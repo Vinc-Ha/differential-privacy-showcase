@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Experience Differential Privacy</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: {} }
+    }
+  </script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="dark bg-gray-950 text-gray-100 min-h-screen antialiased">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useReducer, useMemo, useRef } = React;
+
+    // ─── Dataset ──────────────────────────────────────────────────────────────
+    function randInt(min, max) {
+      return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    function generateDataset() {
+      return Array.from({ length: 100 }, (_, i) => ({
+        facility_id: i + 1,
+        energy_consumption_kwh: randInt(500, 5000),
+        co2_emissions_kg: randInt(100, 1000),
+        headcount: randInt(10, 200),
+      }));
+    }
+
+    // ─── DP Math ──────────────────────────────────────────────────────────────
+    function laplaceSample(b) {
+      // Inverse CDF method for Laplace(0, b)
+      const u = Math.random() - 0.5;
+      return -b * Math.sign(u) * Math.log(1 - 2 * Math.abs(u));
+    }
+
+    const FIELD_RANGES = {
+      energy_consumption_kwh: 4500,
+      co2_emissions_kg:       900,
+      headcount:              190,
+    };
+
+    const FIELD_LABELS = {
+      energy_consumption_kwh: 'Energy (kWh)',
+      co2_emissions_kg:       'CO₂ (kg)',
+      headcount:              'Headcount',
+    };
+
+    function getSensitivity(stat, field, n) {
+      if (stat === 'average') return FIELD_RANGES[field] / n;
+      if (stat === 'maximum') return FIELD_RANGES[field];
+      if (stat === 'count')   return 1;
+    }
+
+    function computeExact(stat, field, dataset, threshold = 0) {
+      if (stat === 'average') {
+        return dataset.reduce((a, r) => a + r[field], 0) / dataset.length;
+      }
+      if (stat === 'maximum') {
+        return Math.max(...dataset.map(r => r[field]));
+      }
+      if (stat === 'count') {
+        return dataset.filter(r => r[field] > threshold).length;
+      }
+    }
+
+    function computeDP(stat, field, dataset, epsilon, threshold = 0) {
+      const exact = computeExact(stat, field, dataset, threshold);
+      const b = getSensitivity(stat, field, dataset.length) / epsilon;
+      return exact + laplaceSample(b);
+    }
+
+    // ─── Claude API Stubs ─────────────────────────────────────────────────────
+    // STUB: Replace with an Anthropic API call for dynamic contextual labels.
+    // Example replacement:
+    //   const res = await anthropic.messages.create({
+    //     model: 'claude-sonnet-4-20250514',
+    //     messages: [{ role: 'user', content: `Describe ε=${epsilon} in one plain sentence.` }]
+    //   });
+    //   return res.content[0].text;
+    function generateLabel(epsilon) {
+      if (epsilon < 0.1) return 'Strong privacy, rough answer';
+      if (epsilon < 1)   return 'Good privacy, acceptable accuracy';
+      if (epsilon < 3)   return 'Balanced trade-off';
+      if (epsilon < 7)   return 'Weak privacy, precise answer';
+      return 'Minimal privacy, near-exact answer';
+    }
+
+    // STUB: Replace with an Anthropic API call to personalize takeaways from queryHistory.
+    // Example replacement:
+    //   const summary = queryHistory.map(q => `stat=${q.stat} field=${q.field} ε=${q.epsilon}`).join('; ');
+    //   const res = await anthropic.messages.create({ ... prompt includes summary ... });
+    function generateTakeaways(/* queryHistory */) {
+      return [
+        'Epsilon controls the privacy–accuracy trade-off — there is no free lunch.',
+        'A privacy budget limits how much information can leak across many queries.',
+        'Differential privacy makes reconstruction attacks provably hard, even for an honest attacker.',
+      ];
+    }
+
+    // ─── Constants ────────────────────────────────────────────────────────────
+    const INITIAL_BUDGET  = 5.0;
+    const QUERY_COST      = 1.0;   // multiplied by epsilon
+    const ATTACK_COST     = 0.5;   // multiplied by epsilon, per reconstruction query
+    const TARGET_ID       = 42;
+
+    // ─── Reducer ──────────────────────────────────────────────────────────────
+    function initState() {
+      return {
+        phase:        'landing',   // 'landing' | 'main' | 'takeaway'
+        activeTab:    0,
+        dataset:      generateDataset(),
+        epsilon:      1.0,
+        budget:       INITIAL_BUDGET,
+        queryHistory: [],
+        module3: {
+          queries: [],             // [{threshold, exactResult, dpResult}]
+          phase:   'attack',       // 'attack' | 'replay' | 'done'
+        },
+      };
+    }
+
+    function reducer(state, action) {
+      switch (action.type) {
+        case 'START':
+          return { ...state, phase: 'main' };
+        case 'SET_TAB':
+          return { ...state, activeTab: action.tab };
+        case 'SET_EPSILON':
+          return { ...state, epsilon: action.epsilon };
+        case 'RUN_QUERY': {
+          const cost = Math.min(action.entry.epsilon * QUERY_COST, state.budget);
+          return {
+            ...state,
+            budget:       parseFloat(Math.max(0, state.budget - cost).toFixed(4)),
+            queryHistory: [...state.queryHistory, action.entry],
+          };
+        }
+        case 'RUN_ATTACK_QUERY': {
+          if (state.module3.queries.length >= 5) return state;
+          const cost = Math.min(state.epsilon * ATTACK_COST, state.budget);
+          return {
+            ...state,
+            budget: parseFloat(Math.max(0, state.budget - cost).toFixed(4)),
+            module3: {
+              ...state.module3,
+              queries: [...state.module3.queries, action.entry],
+            },
+          };
+        }
+        case 'ATTACK_INFER':
+          return { ...state, module3: { ...state.module3, phase: 'replay' } };
+        case 'ATTACK_REPLAY_DONE':
+          return { ...state, module3: { ...state.module3, phase: 'done' } };
+        case 'WRAP_UP':
+          return { ...state, phase: 'takeaway' };
+        case 'RESTART':
+          return initState();
+        default:
+          return state;
+      }
+    }
+
+    // ─── Budget Bar ───────────────────────────────────────────────────────────
+    function BudgetBar({ budget, onWrapUp }) {
+      const pct      = (budget / INITIAL_BUDGET) * 100;
+      const barColor = pct > 60 ? 'bg-green-500' : pct > 25 ? 'bg-amber-400' : 'bg-red-500';
+      const exhausted = budget <= 0;
+
+      return (
+        <div className="sticky top-0 z-50 bg-gray-900 border-b border-gray-800">
+          <div className="max-w-3xl mx-auto px-6 py-3 flex items-center gap-4">
+            <span className="text-xs text-gray-500 whitespace-nowrap">Privacy budget</span>
+            <div className="flex-1 bg-gray-700 rounded-full h-2 overflow-hidden">
+              <div
+                className={`h-2 rounded-full transition-all duration-500 ${barColor}`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            <span className="text-xs font-mono text-gray-400 whitespace-nowrap">
+              ε {budget.toFixed(2)} / {INITIAL_BUDGET.toFixed(1)}
+            </span>
+            <button
+              onClick={onWrapUp}
+              className="text-xs px-3 py-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white transition-colors"
+            >
+              Wrap up
+            </button>
+          </div>
+          {exhausted && (
+            <div className="bg-red-950 border-t border-red-800 text-red-300 text-xs px-6 py-2 text-center max-w-3xl mx-auto">
+              Budget exhausted — in a real system, no further queries would be allowed. This is what a privacy budget feels like.
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── Module 1: Query the Dataset ─────────────────────────────────────────
+    function Module1({ dataset, epsilon, budget, dispatch }) {
+      const [stat, setStat]           = useState('average');
+      const [field, setField]         = useState('energy_consumption_kwh');
+      const [threshold, setThreshold] = useState(2500);
+      const [result, setResult]       = useState(null);
+      const [showFormula, setShowFormula] = useState(false);
+      const exhausted = budget <= 0;
+
+      function runQuery() {
+        const exact = computeExact(stat, field, dataset, threshold);
+        const dp    = computeDP(stat, field, dataset, epsilon, threshold);
+        const entry = { stat, field, threshold, exact, dp, epsilon };
+        setResult(entry);
+        dispatch({ type: 'RUN_QUERY', entry });
+      }
+
+      const sensitivity = getSensitivity(stat, field, dataset.length);
+      const cost = Math.min(epsilon * QUERY_COST, budget);
+
+      return (
+        <div className="space-y-6">
+          <p className="text-sm text-gray-400">
+            Ask a statistical question about the 100-facility dataset. See the exact answer next to the privacy-protected one.
+          </p>
+
+          <div className="flex flex-wrap gap-4 items-end">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Statistic</label>
+              <select
+                value={stat}
+                onChange={e => setStat(e.target.value)}
+                className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
+              >
+                <option value="average">Average</option>
+                <option value="maximum">Maximum</option>
+                <option value="count">Count above threshold</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Field</label>
+              <select
+                value={field}
+                onChange={e => setField(e.target.value)}
+                className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
+              >
+                <option value="energy_consumption_kwh">Energy (kWh)</option>
+                <option value="co2_emissions_kg">CO₂ (kg)</option>
+                <option value="headcount">Headcount</option>
+              </select>
+            </div>
+            {stat === 'count' && (
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Threshold</label>
+                <input
+                  type="number"
+                  value={threshold}
+                  onChange={e => setThreshold(Number(e.target.value))}
+                  className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm w-28 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            )}
+            <button
+              onClick={runQuery}
+              disabled={exhausted}
+              className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium transition-colors"
+            >
+              {exhausted ? 'Budget exhausted' : `Run query (costs ε ${cost.toFixed(2)})`}
+            </button>
+          </div>
+
+          {result && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-gray-800 border border-gray-700 rounded-lg p-5">
+                  <div className="text-xs text-gray-500 mb-2">Exact answer</div>
+                  <div className="text-3xl font-mono font-bold text-gray-100">
+                    {result.exact.toFixed(1)}
+                  </div>
+                </div>
+                <div className="bg-indigo-950 border border-indigo-800 rounded-lg p-5">
+                  <div className="text-xs text-indigo-400 mb-2">DP-protected answer</div>
+                  <div className="text-3xl font-mono font-bold text-indigo-200">
+                    {result.dp.toFixed(1)}
+                  </div>
+                </div>
+              </div>
+              <div className="text-sm text-gray-400">
+                Difference:{' '}
+                <span className="font-mono text-gray-200">
+                  {Math.abs(result.exact - result.dp).toFixed(1)}
+                </span>
+              </div>
+              <button
+                onClick={() => setShowFormula(v => !v)}
+                className="text-xs text-indigo-400 hover:text-indigo-300 underline"
+              >
+                {showFormula ? 'Hide formula' : 'Show me the formula'}
+              </button>
+              {showFormula && (
+                <div className="bg-gray-900 border border-gray-700 rounded p-4 text-xs font-mono text-gray-300 space-y-1">
+                  <div>DP answer = exact + Laplace(0, Δf / ε)</div>
+                  <div>sensitivity Δf = {sensitivity.toFixed(4)}</div>
+                  <div>scale  b = Δf / ε = {(sensitivity / result.epsilon).toFixed(4)}</div>
+                  <div>ε = {result.epsilon.toFixed(2)}</div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── Module 2: The Epsilon Knob ───────────────────────────────────────────
+    function Module2({ dataset, epsilon, dispatch }) {
+      const [stat, setStat]   = useState('average');
+      const [field, setField] = useState('energy_consumption_kwh');
+
+      // Linear slider 0–100 mapped to log scale ε 0.01–10
+      const sliderToEps = v => Math.pow(10, -2 + (v / 100) * 3);
+      const epsToSlider = e => ((Math.log10(e) + 2) / 3) * 100;
+      const [sliderVal, setSliderVal] = useState(epsToSlider(epsilon));
+
+      const eps         = sliderToEps(sliderVal);
+      const exactAnswer = useMemo(() => computeExact(stat, field, dataset), [stat, field, dataset]);
+      const dpAnswer    = useMemo(() => computeDP(stat, field, dataset, eps), [stat, field, dataset, eps]);
+      const privacyPct  = Math.max(0, Math.min(100, 100 - (Math.log10(eps) + 2) / 3 * 100));
+      const accuracyPct = 100 - privacyPct;
+      const label       = generateLabel(eps);
+
+      function handleSlider(e) {
+        const v = Number(e.target.value);
+        setSliderVal(v);
+        dispatch({ type: 'SET_EPSILON', epsilon: sliderToEps(v) });
+      }
+
+      return (
+        <div className="space-y-6">
+          <p className="text-sm text-gray-400">
+            Drag the slider to change ε. The DP answer updates live. No budget is spent here — this is exploration only.
+          </p>
+
+          <div className="flex flex-wrap gap-4">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Statistic</label>
+              <select
+                value={stat}
+                onChange={e => setStat(e.target.value)}
+                className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
+              >
+                <option value="average">Average</option>
+                <option value="maximum">Maximum</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Field</label>
+              <select
+                value={field}
+                onChange={e => setField(e.target.value)}
+                className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
+              >
+                <option value="energy_consumption_kwh">Energy (kWh)</option>
+                <option value="co2_emissions_kg">CO₂ (kg)</option>
+                <option value="headcount">Headcount</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex justify-between text-xs text-gray-500">
+              <span>ε = 0.01 — max privacy</span>
+              <span>ε = 10 — min privacy</span>
+            </div>
+            <input
+              type="range" min="0" max="100" step="0.5"
+              value={sliderVal}
+              onChange={handleSlider}
+              className="w-full accent-indigo-500 cursor-pointer"
+            />
+            <div className="flex items-baseline gap-4">
+              <span className="text-3xl font-mono font-bold text-indigo-300">
+                ε = {eps.toFixed(3)}
+              </span>
+              <span className="text-sm text-gray-400 italic">{label}</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+              <div className="text-xs text-gray-500 mb-1">Exact answer</div>
+              <div className="text-2xl font-mono font-bold">{exactAnswer.toFixed(1)}</div>
+            </div>
+            <div className="bg-indigo-950 border border-indigo-800 rounded-lg p-4">
+              <div className="text-xs text-indigo-400 mb-1">DP answer (live)</div>
+              <div className="text-2xl font-mono font-bold text-indigo-200">{dpAnswer.toFixed(1)}</div>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <div className="flex justify-between text-xs mb-1">
+                <span className="text-green-400">Privacy</span>
+                <span className="text-green-400">{privacyPct.toFixed(0)}%</span>
+              </div>
+              <div className="h-3 bg-gray-700 rounded-full overflow-hidden">
+                <div
+                  className="h-3 bg-green-500 rounded-full transition-all duration-150"
+                  style={{ width: `${privacyPct}%` }}
+                />
+              </div>
+            </div>
+            <div>
+              <div className="flex justify-between text-xs mb-1">
+                <span className="text-amber-400">Accuracy</span>
+                <span className="text-amber-400">{accuracyPct.toFixed(0)}%</span>
+              </div>
+              <div className="h-3 bg-gray-700 rounded-full overflow-hidden">
+                <div
+                  className="h-3 bg-amber-400 rounded-full transition-all duration-150"
+                  style={{ width: `${accuracyPct}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── Module 3: Reconstruction Attack Game ────────────────────────────────
+    function Module3({ dataset, epsilon, budget, dispatch, m3 }) {
+      const target    = dataset.find(r => r.facility_id === TARGET_ID);
+      const [threshold, setThreshold] = useState(100);
+      const exhausted = budget <= 0;
+      const { queries, phase } = m3;
+
+      function runAttackQuery() {
+        if (queries.length >= 5 || exhausted) return;
+        // Query: sum of energy_consumption_kwh for records where headcount < threshold
+        const subset      = dataset.filter(r => r.headcount < threshold);
+        const exactResult = subset.reduce((a, r) => a + r.energy_consumption_kwh, 0);
+        // DP version: sensitivity for sum = max single value = FIELD_RANGES.energy_consumption_kwh
+        const b        = FIELD_RANGES.energy_consumption_kwh / epsilon;
+        const dpResult = exactResult + laplaceSample(b);
+        dispatch({ type: 'RUN_ATTACK_QUERY', entry: { threshold, exactResult, dpResult } });
+      }
+
+      // Inference: find tightest bracketing pair that isolates the target's record
+      function inferValue(useDP) {
+        const tHC      = target.headcount;
+        const incl     = queries.filter(q => q.threshold > tHC);  // sum includes target
+        const excl     = queries.filter(q => q.threshold <= tHC); // sum excludes target
+        if (!incl.length || !excl.length) return null;
+        const bestIncl = incl.reduce((a, b) => a.threshold < b.threshold ? a : b);
+        const bestExcl = excl.reduce((a, b) => a.threshold > b.threshold ? a : b);
+        const iVal = useDP ? bestIncl.dpResult : bestIncl.exactResult;
+        const eVal = useDP ? bestExcl.dpResult : bestExcl.exactResult;
+        return iVal - eVal;
+      }
+
+      const exactInf = phase !== 'attack' ? inferValue(false) : null;
+      const dpInf    = phase === 'done'   ? inferValue(true)  : null;
+
+      const attackWon  = exactInf != null &&
+        Math.abs(exactInf - target.energy_consumption_kwh) / target.energy_consumption_kwh < 0.05;
+      const dpDefended = dpInf != null &&
+        Math.abs(dpInf - target.energy_consumption_kwh) / target.energy_consumption_kwh >= 0.05;
+
+      const costPerQuery = (epsilon * ATTACK_COST).toFixed(2);
+
+      return (
+        <div className="space-y-6">
+          <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 text-sm space-y-3">
+            <p className="font-medium text-gray-200">You are an attacker.</p>
+            <p className="text-gray-400">
+              Your target is{' '}
+              <span className="text-indigo-300 font-mono">Facility #{TARGET_ID}</span>.
+              You want to know their energy consumption — but that's private.
+            </p>
+            <p className="text-gray-400">
+              From their public LinkedIn page, you already know they have{' '}
+              <span className="text-yellow-300 font-mono font-bold">{target.headcount} employees</span>.
+              You can query the <em>total energy</em> of any subgroup filtered by headcount.
+              Use two queries that bracket {target.headcount} to isolate the target's value by subtraction.
+            </p>
+            <p className="text-gray-500 text-xs">
+              Queries remaining: <span className="text-white font-bold">{5 - queries.length}</span>
+            </p>
+          </div>
+
+          {phase === 'attack' && (
+            <div className="flex flex-wrap gap-4 items-end">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">
+                  Sum of energy where headcount &lt;
+                </label>
+                <input
+                  type="number" min="10" max="200"
+                  value={threshold}
+                  onChange={e => setThreshold(Number(e.target.value))}
+                  className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm w-24 focus:outline-none focus:border-red-500"
+                />
+              </div>
+              <button
+                onClick={runAttackQuery}
+                disabled={queries.length >= 5 || exhausted}
+                className="px-4 py-2 rounded bg-red-700 hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium transition-colors"
+              >
+                {exhausted ? 'Budget exhausted' : `Query (costs ε ${costPerQuery})`}
+              </button>
+              {queries.length > 0 && (
+                <button
+                  onClick={() => dispatch({ type: 'ATTACK_INFER' })}
+                  className="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
+                >
+                  Infer now
+                </button>
+              )}
+            </div>
+          )}
+
+          {queries.length > 0 && (
+            <div className="space-y-1">
+              <div className="text-xs text-gray-500 mb-2">Your queries (exact answers, no DP):</div>
+              {queries.map((q, i) => (
+                <div key={i} className="flex items-center gap-3 text-sm font-mono bg-gray-900 border border-gray-800 rounded px-3 py-2">
+                  <span className="text-gray-600">#{i + 1}</span>
+                  <span className="text-gray-400">headcount &lt; {q.threshold}</span>
+                  <span className="ml-auto text-gray-100">{q.exactResult.toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {phase !== 'attack' && (
+            <div>
+              {exactInf != null ? (
+                <div className={`rounded-lg border p-4 ${attackWon ? 'bg-red-950 border-red-700' : 'bg-gray-800 border-gray-600'}`}>
+                  <div className="text-sm font-semibold mb-2">
+                    {attackWon
+                      ? 'Attack succeeded — you identified the facility.'
+                      : 'Inference inconclusive — your queries did not bracket the target.'}
+                  </div>
+                  {attackWon && (
+                    <div className="text-sm space-y-1 text-gray-300">
+                      <div>Your estimate: <span className="font-mono text-white">{exactInf.toFixed(0)} kWh</span></div>
+                      <div>True value: <span className="font-mono text-white">{target.energy_consumption_kwh} kWh</span>
+                        <span className="ml-2 text-xs text-red-400">
+                          ({(Math.abs(exactInf - target.energy_consumption_kwh) / target.energy_consumption_kwh * 100).toFixed(1)}% error)
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {!attackWon && (
+                    <p className="text-xs text-gray-400">
+                      Hint: make one query with a threshold just above the target's headcount and one just below.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="text-sm text-gray-400">No bracketing pair found — make more targeted queries.</div>
+              )}
+            </div>
+          )}
+
+          {phase === 'replay' && (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-400">
+                Now replay the same queries with DP noise applied (ε = {epsilon.toFixed(2)}):
+              </p>
+              {queries.map((q, i) => (
+                <div key={i} className="flex items-center gap-3 text-sm font-mono bg-gray-900 border border-gray-800 rounded px-3 py-2">
+                  <span className="text-gray-600">#{i + 1}</span>
+                  <span className="text-gray-400">headcount &lt; {q.threshold}</span>
+                  <span className="ml-auto flex items-center gap-3">
+                    <span className="line-through text-gray-600">{q.exactResult.toLocaleString()}</span>
+                    <span className="text-indigo-300">{Math.round(q.dpResult).toLocaleString()}</span>
+                  </span>
+                </div>
+              ))}
+              <button
+                onClick={() => dispatch({ type: 'ATTACK_REPLAY_DONE' })}
+                className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 text-sm transition-colors"
+              >
+                See result with DP
+              </button>
+            </div>
+          )}
+
+          {phase === 'done' && dpInf != null && (
+            <div className={`rounded-lg border p-4 ${dpDefended ? 'bg-green-950 border-green-700' : 'bg-amber-950 border-amber-700'}`}>
+              <div className={`text-sm font-semibold mb-2 ${dpDefended ? 'text-green-300' : 'text-amber-300'}`}>
+                {dpDefended
+                  ? 'DP protected the data — attack failed.'
+                  : `DP noise at ε = ${epsilon.toFixed(2)} was not sufficient. Try a smaller ε in the Epsilon Knob tab.`}
+              </div>
+              <div className="text-sm space-y-1 text-gray-300">
+                <div>DP estimate: <span className="font-mono text-white">{dpInf.toFixed(0)} kWh</span></div>
+                <div>True value: <span className="font-mono text-white">{target.energy_consumption_kwh} kWh</span>
+                  <span className="ml-2 text-xs text-gray-500">
+                    ({(Math.abs(dpInf - target.energy_consumption_kwh) / target.energy_consumption_kwh * 100).toFixed(1)}% error with DP)
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── Takeaway Screen ──────────────────────────────────────────────────────
+    function Takeaway({ queryHistory, dispatch }) {
+      const takeaways = generateTakeaways(queryHistory);
+      const apps = [
+        ['US Census Bureau',    'Uses DP to protect individual responses in the 2020 Census while publishing accurate demographic statistics.'],
+        ['Apple',               'Uses DP on-device to improve keyboard suggestions and emoji predictions without sending raw typing data to servers.'],
+        ['Healthcare research', 'Federated learning with DP lets hospitals jointly train diagnostic models without sharing patient records.'],
+      ];
+
+      return (
+        <div className="min-h-screen flex items-center justify-center px-8 py-16">
+          <div className="max-w-2xl w-full space-y-10">
+            <h2 className="text-3xl font-bold text-gray-100">What you just experienced</h2>
+            <ol className="space-y-4">
+              {takeaways.map((t, i) => (
+                <li key={i} className="flex gap-4">
+                  <span className="text-indigo-400 font-bold text-lg leading-snug">{i + 1}.</span>
+                  <span className="text-gray-300 leading-relaxed">{t}</span>
+                </li>
+              ))}
+            </ol>
+            <div className="border-t border-gray-800 pt-8 space-y-4">
+              <div className="text-xs text-gray-500 uppercase tracking-widest">In the real world</div>
+              <div className="space-y-3">
+                {apps.map(([name, desc]) => (
+                  <div key={name} className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-3">
+                    <div className="text-sm font-medium text-gray-200">{name}</div>
+                    <div className="text-sm text-gray-400 mt-0.5">{desc}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <button
+              onClick={() => dispatch({ type: 'RESTART' })}
+              className="px-6 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
+            >
+              Start over
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── App ─────────────────────────────────────────────────────────────────
+    const TABS = ['Query the data', 'The epsilon knob', 'Attack game'];
+
+    function App() {
+      const [state, dispatch] = useReducer(reducer, null, initState);
+      const { phase, activeTab, dataset, epsilon, budget, queryHistory, module3 } = state;
+
+      if (phase === 'landing') {
+        return (
+          <div className="min-h-screen flex flex-col items-center justify-center text-center px-8">
+            <h1 className="text-4xl sm:text-5xl font-bold text-gray-100 max-w-xl leading-tight mb-8">
+              Your data powers breakthroughs —<br className="hidden sm:block" /> but at what cost to privacy?
+            </h1>
+            <button
+              onClick={() => dispatch({ type: 'START' })}
+              className="px-8 py-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-lg font-medium transition-colors"
+            >
+              Find out
+            </button>
+          </div>
+        );
+      }
+
+      if (phase === 'takeaway') {
+        return <Takeaway queryHistory={queryHistory} dispatch={dispatch} />;
+      }
+
+      return (
+        <div className="min-h-screen flex flex-col">
+          <BudgetBar budget={budget} onWrapUp={() => dispatch({ type: 'WRAP_UP' })} />
+          <div className="flex-1 max-w-3xl mx-auto w-full px-6 py-8">
+            {/* Tab bar */}
+            <div className="flex border-b border-gray-800 mb-8">
+              {TABS.map((label, i) => (
+                <button
+                  key={i}
+                  onClick={() => dispatch({ type: 'SET_TAB', tab: i })}
+                  className={`px-5 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                    activeTab === i
+                      ? 'border-indigo-500 text-indigo-300'
+                      : 'border-transparent text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Tab panels */}
+            {activeTab === 0 && (
+              <Module1
+                dataset={dataset}
+                epsilon={epsilon}
+                budget={budget}
+                dispatch={dispatch}
+              />
+            )}
+            {activeTab === 1 && (
+              <Module2
+                dataset={dataset}
+                epsilon={epsilon}
+                dispatch={dispatch}
+              />
+            )}
+            {activeTab === 2 && (
+              <Module3
+                dataset={dataset}
+                epsilon={epsilon}
+                budget={budget}
+                dispatch={dispatch}
+                m3={module3}
+              />
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
