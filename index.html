@@ -262,7 +262,7 @@
 
     // ─── Tab 1: The Attack ────────────────────────────────────────────────────
 
-    function Tab1_Attack() {
+    function Tab1_Attack({ onGoToResearch }) {
       const [guesses,  setGuesses]  = useState({});
       const [revealed, setRevealed] = useState(false);
 
@@ -337,6 +337,13 @@
               </p>
             </div>
           )}
+
+          <button
+            onClick={onGoToResearch}
+            className="w-full text-xs text-gray-600 hover:text-indigo-400 py-2 border border-gray-800 rounded transition-colors"
+          >
+            How does this attack perform on real models? → See the Research tab
+          </button>
         </div>
       );
     }
@@ -470,7 +477,7 @@
 
     // ─── Tab 3: Privacy Loss Random Variable ─────────────────────────────────
 
-    function Tab3_PLRV() {
+    function Tab3_PLRV({ onGoToResearch }) {
       const sliderToEps = v => Math.pow(10, -1 + (v / 100) * 2);
       const epsToSlider = e => ((Math.log10(e) + 1) / 2) * 100;
       const [sliderVal, setSliderVal] = useState(epsToSlider(1.5));
@@ -542,6 +549,120 @@
               This connects directly to the membership inference attack: an attacker's advantage is bounded by e<sup>ε</sup> − 1, which approaches 0 as ε → 0.
             </p>
           </div>
+
+          <button
+            onClick={onGoToResearch}
+            className="w-full text-xs text-gray-600 hover:text-indigo-400 py-2 border border-gray-800 rounded transition-colors"
+          >
+            How do you verify this bound holds on a deployed model? → See the Research tab
+          </button>
+        </div>
+      );
+    }
+
+    // ─── Research papers ──────────────────────────────────────────────────────
+
+    const PAPERS = [
+      {
+        id: 'Jf40H5pRW0',
+        venue: 'NeurIPS 2024',
+        venueCls: 'text-purple-300 bg-purple-950 border-purple-800',
+        url: 'https://openreview.net/forum?id=Jf40H5pRW0',
+        title: 'Open LLMs are Necessary for Current Private Adaptations and Outperform their Closed Alternatives',
+        question: 'Can we privately adapt closed LLMs like GPT-4?',
+        finding: 'No. All four leading methods for privately adapting closed API models leak private data to the provider. Open-weight LLMs with local DP fine-tuning outperform closed alternatives by up to 26% absolute accuracy — at lower monetary cost.',
+        connection: 'Explains why DP-SGD must be run locally. Closed API models are architecturally incapable of providing true privacy guarantees.',
+      },
+      {
+        id: 'jY7fAo9rfK',
+        venue: 'ICLR 2025',
+        venueCls: 'text-sky-300 bg-sky-950 border-sky-800',
+        url: 'https://openreview.net/forum?id=jY7fAo9rfK',
+        title: 'Benchmarking Empirical Privacy Protection for Adaptations of Large Language Models',
+        question: 'Does DP actually protect against membership inference in practice?',
+        finding: 'It depends heavily on data distribution. Fine-tuning on data similar to the pretraining corpus is far riskier at the same ε. LoRA + DP achieves the best empirical protection for out-of-distribution data, but the theoretical guarantee often overstates real-world protection.',
+        connection: 'Validates the loss-score attack from Tab 1 on real models — and shows that the same ε can mean very different levels of actual risk depending on what data was used.',
+      },
+      {
+        id: 'doaAUf9Pi7',
+        venue: 'ICLR 2025',
+        venueCls: 'text-sky-300 bg-sky-950 border-sky-800',
+        url: 'https://openreview.net/forum?id=doaAUf9Pi7',
+        title: 'Natural Identifiers for Privacy and Data Audits in Large Language Models',
+        question: 'How do you verify DP compliance on a model that is already deployed?',
+        finding: 'Standard auditing inserts synthetic canaries during training — impractical post-hoc. Natural identifiers (NIDs), structured strings like cryptographic hashes that already appear in training data, serve as unlimited same-distribution canaries for auditing deployed models without any retraining.',
+        connection: 'Bridges the gap between the formal ε bound shown in Privacy Loss and actually verifying it holds on a live model.',
+      },
+      {
+        id: 'SPz7hBeFUw',
+        venue: 'ICML 2025',
+        venueCls: 'text-amber-300 bg-amber-950 border-amber-800',
+        url: 'https://openreview.net/forum?id=SPz7hBeFUw',
+        title: 'Efficient and Privacy-Preserving Soft Prompt Transfer for LLMs (POST)',
+        question: 'DP fine-tuning on large models is expensive — can we make it practical?',
+        finding: 'POST distills a small local model from the large LLM, tunes soft prompts privately on the small model, then transfers them to the full LLM using only public data. Strong privacy and accuracy are maintained while dramatically reducing compute — and private data never leaves the user.',
+        connection: 'Addresses the practical bottleneck: DP-SGD on large models is computationally heavy. POST makes private LLM adaptation viable at scale.',
+      },
+    ];
+
+    function Tab4_Research({ setActiveTab }) {
+      return (
+        <div className="space-y-6">
+          <p className="text-sm text-gray-400">
+            The attack and defense you explored are not hypothetical. Below is a sequence of research questions the field had to answer — each paper building on the last.
+          </p>
+
+          {/* Arc */}
+          <div className="flex flex-wrap gap-2 items-center text-xs text-gray-500">
+            {['Are closed LLMs safe?', 'Does DP hold in practice?', 'Can we audit deployed models?', 'Can we make DP efficient?'].map((q, i, arr) => (
+              <React.Fragment key={q}>
+                <span className="px-2.5 py-1 bg-gray-800 border border-gray-700 rounded-full">{q}</span>
+                {i < arr.length - 1 && <span className="text-gray-700">→</span>}
+              </React.Fragment>
+            ))}
+          </div>
+
+          {/* Paper cards */}
+          <div className="space-y-4">
+            {PAPERS.map((p, i) => (
+              <div key={p.id} className="border border-gray-700 bg-gray-900/50 rounded-lg p-5 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-mono px-2 py-0.5 rounded border ${p.venueCls}`}>{p.venue}</span>
+                      <span className="text-xs text-gray-600">#{i + 1}</span>
+                    </div>
+                    <div className="text-sm font-semibold text-gray-100 leading-snug">{p.title}</div>
+                  </div>
+                  <a href={p.url} target="_blank" rel="noopener noreferrer"
+                    className="text-xs text-indigo-400 hover:text-indigo-300 underline whitespace-nowrap shrink-0 mt-1">
+                    OpenReview ↗
+                  </a>
+                </div>
+
+                <div className="space-y-0.5">
+                  <div className="text-xs text-gray-500 uppercase tracking-wider">Research question</div>
+                  <p className="text-sm text-gray-300 italic">"{p.question}"</p>
+                </div>
+
+                <div className="space-y-0.5">
+                  <div className="text-xs text-gray-500 uppercase tracking-wider">Key finding</div>
+                  <p className="text-sm text-gray-300 leading-relaxed">{p.finding}</p>
+                </div>
+
+                <div className="flex items-start gap-2 bg-gray-800 border border-gray-700 rounded px-3 py-2">
+                  <span className="text-indigo-400 text-xs mt-0.5 shrink-0">↳</span>
+                  <span className="text-xs text-gray-400">{p.connection}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="border-t border-gray-800 pt-4 text-xs text-gray-600">
+            All papers from the{' '}
+            <a href="https://sprintml.com" target="_blank" rel="noopener noreferrer"
+              className="text-indigo-500 hover:text-indigo-400 underline">sprintml</a> research group.
+          </div>
         </div>
       );
     }
@@ -582,6 +703,17 @@
                 ))}
               </div>
             </div>
+            <div className="border-t border-gray-800 pt-8 space-y-4">
+              <div className="text-xs text-gray-500 uppercase tracking-widest">Advancing the field</div>
+              <p className="text-sm text-gray-400">
+                Recent research from the{' '}
+                <a href="https://sprintml.com" target="_blank" rel="noopener noreferrer" className="text-indigo-400 underline hover:text-indigo-300">sprintml</a>
+                {' '}group has shown that closed LLM APIs are fundamentally unable to provide privacy guarantees
+                (NeurIPS 2024), that DP's practical protection varies widely by data distribution (ICLR 2025),
+                that already-deployed models can be audited using natural identifiers without retraining (ICLR 2025),
+                and that efficient DP fine-tuning is achievable by tuning small models and transferring prompts to large ones (ICML 2025).
+              </p>
+            </div>
             <button
               onClick={onRestart}
               className="px-6 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
@@ -595,7 +727,7 @@
 
     // ─── App ─────────────────────────────────────────────────────────────────
 
-    const TABS = ['The Attack', 'The Defense', 'Privacy Loss'];
+    const TABS = ['The Attack', 'The Defense', 'Privacy Loss', 'Research'];
 
     function App() {
       const [phase,     setPhase]     = useState('landing');
@@ -658,9 +790,10 @@
               ))}
             </div>
 
-            {activeTab === 0 && <Tab1_Attack />}
+            {activeTab === 0 && <Tab1_Attack onGoToResearch={() => setActiveTab(3)} />}
             {activeTab === 1 && <Tab2_Defense />}
-            {activeTab === 2 && <Tab3_PLRV />}
+            {activeTab === 2 && <Tab3_PLRV onGoToResearch={() => setActiveTab(3)} />}
+            {activeTab === 3 && <Tab4_Research setActiveTab={setActiveTab} />}
           </div>
         </div>
       );
