@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>LLM Privacy & Differential Privacy</title>
+  <title>Experience Differential Privacy</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>tailwind.config = { darkMode: 'class', theme: { extend: {} } }</script>
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -16,787 +16,611 @@
   <script type="text/babel">
     const { useState, useMemo } = React;
 
-    // ─── Data ─────────────────────────────────────────────────────────────────
-    // These simulate a language model's loss on 8 text snippets.
-    // 4 were "in training", 4 were not.
-    // baseLoss is the non-DP model's cross-entropy loss on each snippet.
-    const SNIPPETS = [
-      { id: 1, member: true,  baseLoss: 1.52,
-        text: "Solar panel efficiency has increased from 6% in 1954 to over 22% in commercial modules today." },
-      { id: 2, member: true,  baseLoss: 1.63,
-        text: "The levelized cost of energy from utility-scale solar fell 89% between 2010 and 2021." },
-      { id: 3, member: true,  baseLoss: 1.71,
-        text: "Wind energy now provides over 10% of total US electricity generation, up from less than 1% in 2000." },
-      { id: 4, member: true,  baseLoss: 1.48,
-        text: "Electric vehicle battery costs dropped from $1,200/kWh in 2010 to under $130/kWh in 2023." },
-      { id: 5, member: false, baseLoss: 3.21,
-        text: "Tidal energy remains largely untapped despite significant theoretical potential in coastal regions." },
-      { id: 6, member: false, baseLoss: 3.45,
-        text: "Building retrofits for energy efficiency could reduce commercial energy use by up to 30%." },
-      { id: 7, member: false, baseLoss: 3.18,
-        text: "Carbon border adjustment mechanisms are designed to prevent emissions leakage in traded goods." },
-      { id: 8, member: false, baseLoss: 3.37,
-        text: "Demand response programs incentivize consumers to reduce electricity usage during peak grid stress." },
+    // ─── Dataset ──────────────────────────────────────────────────────────────
+    const DATABASE_D = [
+      { id:1, name:'Alice M.',  dept:'Engineering', salary:95000,  sick:4 },
+      { id:2, name:'Bob K.',    dept:'Engineering', salary:88000,  sick:6 },
+      { id:3, name:'Carol T.',  dept:'Sales',       salary:72000,  sick:8 },
+      { id:4, name:'David L.',  dept:'HR',          salary:65000,  sick:5 },
+      { id:5, name:'Eve P.',    dept:'Engineering', salary:105000, sick:3 },
+      { id:6, name:'Frank N.',  dept:'Sales',       salary:78000,  sick:7 },
+      { id:7, name:'Grace H.',  dept:'HR',          salary:62000,  sick:9 },
+      { id:8, name:'Henry J.',  dept:'Engineering', salary:91000,  sick:5 },
     ];
 
-    // ─── Math ─────────────────────────────────────────────────────────────────
+    // Person x — all fields private, revealed only after the quiz
+    const PERSON_X = { id:9, name:'Morgan X.', dept:'Engineering', salary:145000, sick:2 };
+    const DATABASE_DX = [...DATABASE_D, PERSON_X];
 
-    // Simulate how DP-SGD training compresses loss scores toward the center.
-    // As epsilon decreases, members and non-members become indistinguishable.
-    // Deterministic — no randomness — so cards don't flicker on re-render.
-    function getDPLoss(baseLoss, epsilon) {
-      const center = 2.5;
-      const t = Math.min(1, epsilon / 5); // 0 = fully private, 1 = unprotected
-      return baseLoss * t + center * (1 - t);
-    }
-
-    // Returns mean and std of member/non-member loss distributions for a given epsilon.
-    function getDistParams(epsilon) {
-      const t = Math.min(1, epsilon / 5);
+    // ─── Statistics ───────────────────────────────────────────────────────────
+    function computeStats(dataset) {
+      const n = dataset.length;
       return {
-        member:    { mu: 1.8 * t + 2.5 * (1 - t), sigma: 0.22 + 0.30 * (1 - t) },
-        nonMember: { mu: 3.2 * t + 2.5 * (1 - t), sigma: 0.28 + 0.30 * (1 - t) },
+        avgSalary: dataset.reduce((a, r) => a + r.salary, 0) / n,
+        avgSick:   dataset.reduce((a, r) => a + r.sick, 0)   / n,
+        engCount:  dataset.filter(r => r.dept === 'Engineering').length,
+        maxSalary: Math.max(...dataset.map(r => r.salary)),
       };
     }
 
-    function gaussianPDF(x, mu, sigma) {
-      return Math.exp(-0.5 * ((x - mu) / sigma) ** 2) / (sigma * Math.sqrt(2 * Math.PI));
+    const STATS_D  = computeStats(DATABASE_D);
+    const STATS_DX = computeStats(DATABASE_DX);
+
+    // Global sensitivity for the Laplace mechanism (for each stat)
+    const STAT_DEFS = [
+      {
+        key: 'avgSalary',
+        label: 'Mean salary',
+        icon: '💼',
+        fmt: v => `$${Math.round(v).toLocaleString()}`,
+        // Adding one person with salary up to $145k shifts the mean by at most $145k/n
+        sensitivity: 145000 / DATABASE_DX.length,
+      },
+      {
+        key: 'avgSick',
+        label: 'Mean sick days / yr',
+        icon: '🏥',
+        fmt: v => v.toFixed(2),
+        // Max sick days per person assumed ≤ 30
+        sensitivity: 30 / DATABASE_DX.length,
+      },
+      {
+        key: 'engCount',
+        label: 'Engineering headcount',
+        icon: '👥',
+        fmt: v => String(Math.round(v)),
+        sensitivity: 1,
+      },
+      {
+        key: 'maxSalary',
+        label: 'Highest salary',
+        icon: '📈',
+        fmt: v => `$${Math.round(v).toLocaleString()}`,
+        // Max query: adding one record can change it by up to the record's value
+        sensitivity: 145000,
+      },
+    ];
+
+    // ─── DP Math ──────────────────────────────────────────────────────────────
+    function laplaceSample(b) {
+      const u = Math.random() - 0.5;
+      return -b * Math.sign(u) * Math.log(1 - 2 * Math.abs(u));
     }
 
-    // AUC of the membership inference attack (Gaussian assumption).
-    // AUC = 1.0 is a perfect attack; 0.5 is random guessing.
-    function erfc(x) {
-      const t = 1 / (1 + 0.3275911 * Math.abs(x));
-      const p = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
-      const r = 1 - p * Math.exp(-x * x);
-      return x >= 0 ? r : 2 - r;
-    }
-    function Phi(x) { return 0.5 * erfc(-x / Math.sqrt(2)); }
-
-    function computeAUC(epsilon) {
-      const { member, nonMember } = getDistParams(epsilon);
-      const d = (nonMember.mu - member.mu) / Math.sqrt(member.sigma ** 2 + nonMember.sigma ** 2);
-      return Phi(d);
+    function sampleNoisyStats(trueStats, epsilon) {
+      return Object.fromEntries(
+        STAT_DEFS.map(def => [
+          def.key,
+          trueStats[def.key] + laplaceSample(def.sensitivity / epsilon),
+        ])
+      );
     }
 
-    // ─── Claude API Stubs ─────────────────────────────────────────────────────
-    // STUB: Replace with Anthropic API call for personalized takeaways.
-    // Example:
-    //   const res = await anthropic.messages.create({
-    //     model: 'claude-opus-4-5',
-    //     messages: [{ role: 'user', content: `The user explored epsilon values: ${epsilonHistory.join(', ')}. Write 3 personalized takeaways.` }]
-    //   });
-    function generateTakeaways() {
-      return [
-        'Language models memorize training data — a low loss score on a text sample is a signal the model was trained on it.',
-        'DP-SGD adds calibrated noise to gradients during training, preventing memorization and making membership inference unreliable.',
-        'The privacy loss random variable formalizes the guarantee: ε-DP ensures no model output can reveal more than ε nats of information about any individual sample.',
-      ];
-    }
+    // ─── Quiz questions ───────────────────────────────────────────────────────
+    const QUESTIONS = [
+      {
+        key: 'salary',
+        label: 'Salary',
+        q: 'The mean salary rose by ~$7,000 when x joined. What does this reveal about x\'s salary?',
+        options: [
+          'Around $82,000 — near the group average',
+          'Between $90,000 and $105,000',
+          'Well above $100,000 — over $130,000',
+        ],
+        correct: 2,
+        math: 'x\'s salary = 9 × $89k − 8 × $82k = $801k − $656k = $145,000. The new mean arithmetically exposes the exact value.',
+      },
+      {
+        key: 'dept',
+        label: 'Department',
+        q: 'Engineering headcount increased by 1. Sales and HR did not change. What can you conclude?',
+        options: [
+          'x works in Sales or HR',
+          'x works in Engineering',
+          'x\'s department is ambiguous from count data',
+        ],
+        correct: 1,
+        math: 'A +1 in Engineering and 0 elsewhere is a perfect match — department-level counts reveal x\'s group exactly.',
+      },
+      {
+        key: 'sick',
+        label: 'Sick leave',
+        q: 'Mean sick days fell from 5.9 to 5.4 when x joined. What can you infer?',
+        options: [
+          'x takes more sick leave than the group average',
+          'x takes sick leave at roughly the average rate',
+          'x takes significantly fewer sick days than colleagues',
+        ],
+        correct: 2,
+        math: 'The mean fell, so x pulls it down. x\'s value = 9 × 5.44 − 8 × 5.875 = 49 − 47 = 2 days. Well below the group average of 5.9.',
+      },
+    ];
 
-    // ─── Shared UI ────────────────────────────────────────────────────────────
+    // ─── Step indicator ───────────────────────────────────────────────────────
+    const STEPS = ['D vs D+x', 'Inference', 'DP protection'];
 
-    function LossBar({ loss }) {
-      const pct   = Math.min(100, (loss / 4.5) * 100);
-      const color = loss < 2.0 ? 'bg-red-500' : loss < 2.8 ? 'bg-amber-400' : 'bg-emerald-500';
-      const label = loss < 2.0 ? 'text-red-400' : loss < 2.8 ? 'text-amber-400' : 'text-emerald-400';
+    function StepBar({ current }) {
       return (
-        <div className="flex items-center gap-2">
-          <div className="flex-1 bg-gray-700 rounded-full h-1.5 overflow-hidden">
-            <div className={`h-1.5 rounded-full transition-all duration-300 ${color}`} style={{ width: `${pct}%` }} />
-          </div>
-          <span className={`text-xs font-mono w-8 text-right ${label}`}>{loss.toFixed(2)}</span>
+        <div className="flex items-center gap-2 mb-8">
+          {STEPS.map((s, i) => (
+            <React.Fragment key={s}>
+              <div className={`flex items-center gap-2 text-xs ${
+                i === current ? 'text-indigo-300' : i < current ? 'text-gray-500' : 'text-gray-700'
+              }`}>
+                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold ${
+                  i === current ? 'bg-indigo-600 text-white' :
+                  i < current  ? 'bg-gray-700 text-gray-400' :
+                                 'border border-gray-700 text-gray-700'
+                }`}>{i + 1}</span>
+                <span className="hidden sm:inline">{s}</span>
+              </div>
+              {i < STEPS.length - 1 && (
+                <div className={`flex-1 h-px ${i < current ? 'bg-gray-600' : 'bg-gray-800'}`} />
+              )}
+            </React.Fragment>
+          ))}
         </div>
       );
     }
 
-    function SnippetCard({ snippet, loss, guess, onGuess, revealed }) {
-      const g       = guess;
-      const correct = revealed && g !== null && (g === 'member') === snippet.member;
-      const wrong   = revealed && g !== null && (g === 'member') !== snippet.member;
+    // ─── Landing ──────────────────────────────────────────────────────────────
+    function Landing({ onStart }) {
       return (
-        <div className={`border rounded-lg p-4 space-y-2.5 transition-colors ${
-          correct ? 'border-green-700 bg-green-950/30' :
-          wrong   ? 'border-red-700  bg-red-950/30'   :
-                    'border-gray-700 bg-gray-800/50'
-        }`}>
-          <p className="text-sm text-gray-200 leading-snug">{snippet.text}</p>
-          <div className="space-y-1">
-            <div className="text-xs text-gray-500">Model loss</div>
-            <LossBar loss={loss} />
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => !revealed && onGuess('member')}
-              className={`px-3 py-1 text-xs rounded border transition-colors ${
-                g === 'member'
-                  ? 'bg-indigo-700 border-indigo-600 text-white'
-                  : 'border-gray-600 text-gray-400 hover:border-indigo-500 hover:text-indigo-300'
-              } ${revealed ? 'cursor-default' : 'cursor-pointer'}`}
-            >In training</button>
-            <button
-              onClick={() => !revealed && onGuess('non-member')}
-              className={`px-3 py-1 text-xs rounded border transition-colors ${
-                g === 'non-member'
-                  ? 'bg-gray-600 border-gray-500 text-white'
-                  : 'border-gray-600 text-gray-400 hover:border-gray-400'
-              } ${revealed ? 'cursor-default' : 'cursor-pointer'}`}
-            >Not in training</button>
-            {revealed && g !== null && (
-              <span className={`ml-auto text-xs font-medium ${correct ? 'text-green-400' : 'text-red-400'}`}>
-                {correct ? '✓ Correct' : `✗ Was ${snippet.member ? 'in training' : 'not in training'}`}
-              </span>
-            )}
-            {revealed && g === null && (
-              <span className="ml-auto text-xs text-gray-500">
-                Was {snippet.member ? 'in training' : 'not in training'}
-              </span>
-            )}
-          </div>
-        </div>
-      );
-    }
-
-    // ─── Distribution Chart (Tab 2) ───────────────────────────────────────────
-
-    function DistributionChart({ epsilon }) {
-      const W = 480, H = 150;
-      const PAD = { l: 36, r: 16, t: 16, b: 28 };
-      const xMin = 0.5, xMax = 4.5;
-      const chartH = H - PAD.t - PAD.b;
-      const chartW = W - PAD.l - PAD.r;
-
-      function xSvg(x) { return PAD.l + ((x - xMin) / (xMax - xMin)) * chartW; }
-
-      function buildPath(mu, sigma) {
-        return Array.from({ length: 81 }, (_, i) => {
-          const x  = xMin + (i / 80) * (xMax - xMin);
-          const y  = gaussianPDF(x, mu, sigma);
-          const sx = xSvg(x);
-          const sy = PAD.t + chartH - Math.min(chartH - 2, y * chartH * 2.8);
-          return `${i === 0 ? 'M' : 'L'}${sx.toFixed(1)},${sy.toFixed(1)}`;
-        }).join(' ');
-      }
-
-      const { member, nonMember } = getDistParams(epsilon);
-      const mPath  = buildPath(member.mu, member.sigma);
-      const nmPath = buildPath(nonMember.mu, nonMember.sigma);
-      const base   = PAD.t + chartH;
-      const ticks  = [1, 1.5, 2, 2.5, 3, 3.5, 4];
-
-      return (
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 150 }}>
-          <line x1={PAD.l} y1={base} x2={W - PAD.r} y2={base} stroke="#374151" strokeWidth="1"/>
-          {ticks.map(t => (
-            <g key={t}>
-              <line x1={xSvg(t)} y1={base} x2={xSvg(t)} y2={base + 4} stroke="#374151" strokeWidth="1"/>
-              <text x={xSvg(t)} y={base + 14} textAnchor="middle" fontSize="9" fill="#6b7280">{t}</text>
-            </g>
-          ))}
-          <text x={PAD.l + chartW / 2} y={H - 2} textAnchor="middle" fontSize="9" fill="#6b7280">model loss</text>
-          {/* Member */}
-          <path d={`${mPath} L${xSvg(xMax)},${base} L${xSvg(xMin)},${base} Z`} fill="rgba(99,102,241,0.18)"/>
-          <path d={mPath} stroke="#818cf8" strokeWidth="2" fill="none"/>
-          {/* Non-member */}
-          <path d={`${nmPath} L${xSvg(xMax)},${base} L${xSvg(xMin)},${base} Z`} fill="rgba(251,146,60,0.18)"/>
-          <path d={nmPath} stroke="#fb923c" strokeWidth="2" fill="none"/>
-        </svg>
-      );
-    }
-
-    // ─── PLRV Chart (Tab 3) ───────────────────────────────────────────────────
-
-    function PLRVChart({ epsilon }) {
-      const W = 480, H = 150;
-      const PAD = { l: 36, r: 16, t: 16, b: 28 };
-      const xMin = -4, xMax = 4;
-      const chartH = H - PAD.t - PAD.b;
-      const chartW = W - PAD.l - PAD.r;
-
-      function xSvg(x) { return PAD.l + ((x - xMin) / (xMax - xMin)) * chartW; }
-      function laplacePDF(x, b) { return Math.exp(-Math.abs(x) / b) / (2 * b); }
-
-      function buildPath(pdfFn) {
-        return Array.from({ length: 101 }, (_, i) => {
-          const x  = xMin + (i / 100) * (xMax - xMin);
-          const y  = pdfFn(x);
-          const sx = xSvg(x);
-          const sy = PAD.t + chartH - Math.min(chartH - 2, y * chartH * 4.5);
-          return `${i === 0 ? 'M' : 'L'}${sx.toFixed(1)},${sy.toFixed(1)}`;
-        }).join(' ');
-      }
-
-      // Non-DP: wide Laplace (scale=1.5) — represents unprotected model, unbounded PLRV
-      const noDpPath = buildPath(x => laplacePDF(x, 1.5));
-      // DP: narrow Laplace hard-capped at ±ε
-      const dpPath   = buildPath(x => Math.abs(x) > epsilon ? 0 : laplacePDF(x, epsilon * 0.4));
-
-      const base = PAD.t + chartH;
-      const ticks = [-3, -2, -1, 0, 1, 2, 3];
-      const epX = xSvg(epsilon), enX = xSvg(-epsilon);
-
-      return (
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 150 }}>
-          <line x1={PAD.l} y1={base} x2={W - PAD.r} y2={base} stroke="#374151" strokeWidth="1"/>
-          {ticks.map(t => (
-            <g key={t}>
-              <line x1={xSvg(t)} y1={base} x2={xSvg(t)} y2={base + 4} stroke="#374151" strokeWidth="1"/>
-              <text x={xSvg(t)} y={base + 14} textAnchor="middle" fontSize="9" fill="#6b7280">{t}</text>
-            </g>
-          ))}
-          <text x={PAD.l + chartW / 2} y={H - 2} textAnchor="middle" fontSize="9" fill="#6b7280">privacy loss ℒ(O)</text>
-          {/* Epsilon bound lines */}
-          <line x1={epX} y1={PAD.t} x2={epX} y2={base} stroke="#a78bfa" strokeWidth="1.5" strokeDasharray="4,3"/>
-          <line x1={enX} y1={PAD.t} x2={enX} y2={base} stroke="#a78bfa" strokeWidth="1.5" strokeDasharray="4,3"/>
-          <text x={epX + 3} y={PAD.t + 10} fontSize="9" fill="#a78bfa">+ε</text>
-          <text x={enX - 16} y={PAD.t + 10} fontSize="9" fill="#a78bfa">−ε</text>
-          {/* No-DP */}
-          <path d={`${noDpPath} L${xSvg(xMax)},${base} L${xSvg(xMin)},${base} Z`} fill="rgba(239,68,68,0.12)"/>
-          <path d={noDpPath} stroke="#f87171" strokeWidth="2" fill="none"/>
-          {/* DP */}
-          <path d={`${dpPath} L${xSvg(xMax)},${base} L${xSvg(xMin)},${base} Z`} fill="rgba(99,102,241,0.25)"/>
-          <path d={dpPath} stroke="#818cf8" strokeWidth="2" fill="none"/>
-        </svg>
-      );
-    }
-
-    // ─── Tab 1: The Attack ────────────────────────────────────────────────────
-
-    function Tab1_Attack({ onGoToResearch }) {
-      const [guesses,  setGuesses]  = useState({});
-      const [revealed, setRevealed] = useState(false);
-
-      function guess(id, val) {
-        if (revealed) return;
-        setGuesses(g => ({ ...g, [id]: val }));
-      }
-
-      const allGuessed = Object.keys(guesses).length === SNIPPETS.length;
-      const score = revealed
-        ? SNIPPETS.filter(s => (guesses[s.id] === 'member') === s.member).length
-        : null;
-
-      return (
-        <div className="space-y-6">
-          <div className="bg-amber-950 border border-amber-800 rounded-lg p-4 text-sm space-y-2">
-            <p className="font-medium text-amber-200">You are an attacker with black-box access to a language model.</p>
-            <p className="text-amber-300/80">
-              You can feed any text to the model and observe its <strong>loss</strong> (cross-entropy).
-              A low loss means the model is confident about the text — a sign it may have seen it during training.
-            </p>
-            <div className="flex flex-wrap gap-4 pt-1 text-xs text-amber-300/60">
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-1.5 rounded-full bg-red-500"></span>
-                Low loss → model confident → likely trained on this
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-1.5 rounded-full bg-emerald-500"></span>
-                High loss → model uncertain → probably not in training
-              </span>
-            </div>
-          </div>
-
-          <p className="text-sm text-gray-400">
-            Below are 8 text snippets and the model's loss on each. Classify each as <em>in training</em> or <em>not in training</em>.
+        <div className="min-h-screen flex flex-col items-center justify-center text-center px-8 gap-6">
+          <h1 className="text-4xl sm:text-5xl font-bold text-gray-100 max-w-2xl leading-tight">
+            What can aggregate statistics<br className="hidden sm:block" /> reveal about you?
+          </h1>
+          <p className="text-gray-400 max-w-md text-sm leading-relaxed">
+            Knowing the mean salary before and after you join a database is enough
+            to infer your exact salary. Differential privacy is designed to close this gap.
           </p>
-
-          <div className="grid gap-3">
-            {SNIPPETS.map(s => (
-              <SnippetCard
-                key={s.id}
-                snippet={s}
-                loss={s.baseLoss}
-                guess={guesses[s.id] ?? null}
-                onGuess={val => guess(s.id, val)}
-                revealed={revealed}
-              />
-            ))}
-          </div>
-
-          {allGuessed && !revealed && (
-            <button
-              onClick={() => setRevealed(true)}
-              className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-medium transition-colors"
-            >
-              Reveal results
-            </button>
-          )}
-
-          {revealed && (
-            <div className="bg-gray-800 border border-gray-700 rounded-lg p-5 space-y-2">
-              <div className="text-2xl font-bold">{score} / {SNIPPETS.length}</div>
-              <p className="text-sm text-gray-400">
-                {score >= 7
-                  ? 'Near-perfect attack. The loss gap between members and non-members is wide and easy to exploit. This is a real vulnerability in models trained without privacy protection.'
-                  : score >= 5
-                  ? 'Solid attack. The loss signal gives a clear advantage over random guessing.'
-                  : 'The loss scores here were already noisy — head to the Defense tab to see what it looks like when DP is applied intentionally.'}
-              </p>
-              <p className="text-sm text-gray-500">
-                Head to <strong className="text-gray-300">The Defense</strong> tab to see how DP-SGD training removes this signal.
-              </p>
-            </div>
-          )}
-
           <button
-            onClick={onGoToResearch}
-            className="w-full text-xs text-gray-600 hover:text-indigo-400 py-2 border border-gray-800 rounded transition-colors"
+            onClick={onStart}
+            className="px-8 py-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-base font-medium transition-colors"
           >
-            How does this attack perform on real models? → See the Research tab
+            Show me
           </button>
         </div>
       );
     }
 
-    // ─── Tab 2: The Defense ───────────────────────────────────────────────────
+    // ─── Phase 1: D vs D+x ───────────────────────────────────────────────────
+    function PhaseCompare({ onContinue }) {
+      const [xAdded, setXAdded] = useState(false);
 
-    function Tab2_Defense() {
-      const sliderToEps = v => Math.pow(10, -1 + (v / 100) * 2); // 0.1 → 10
-      const epsToSlider = e => ((Math.log10(e) + 1) / 2) * 100;
-      const [sliderVal, setSliderVal] = useState(epsToSlider(1.0));
-      const epsilon = sliderToEps(sliderVal);
-      const auc     = computeAUC(epsilon);
+      const deltaDir = (key) => {
+        const d = STATS_DX[key] - STATS_D[key];
+        return d > 0 ? '+' : d < 0 ? '−' : '';
+      };
+      const absDelta = (def) => def.fmt(Math.abs(STATS_DX[def.key] - STATS_D[def.key]));
 
-      const dpLosses = useMemo(
-        () => SNIPPETS.map(s => ({ ...s, loss: getDPLoss(s.baseLoss, epsilon) })),
-        [epsilon]
+      return (
+        <div className="max-w-5xl mx-auto px-6 py-10">
+          <StepBar current={0} />
+
+          <div className="space-y-2 mb-8">
+            <h2 className="text-2xl font-bold text-gray-100">The neighboring database</h2>
+            <p className="text-sm text-gray-400 max-w-2xl">
+              An analyst has read-only access to aggregate query results — not individual records.
+              Below is the HR database <span className="font-mono text-indigo-300">D</span>.
+              When one new employee <span className="font-mono text-indigo-300">x</span> joins,
+              the database becomes <span className="font-mono text-indigo-300">D+x</span>.
+              Watch what happens to the statistics.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+
+            {/* Table */}
+            <div className="space-y-2">
+              <div className="text-xs text-gray-500 uppercase tracking-wider">
+                Database <span className="font-mono text-gray-300">{xAdded ? 'D+x' : 'D'}</span>
+                <span className="ml-2 text-gray-600">— {xAdded ? 9 : 8} records</span>
+              </div>
+              <div className="border border-gray-700 rounded-lg overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-800/80 text-gray-400">
+                    <tr>
+                      <th className="px-3 py-2.5 text-left font-medium">Name</th>
+                      <th className="px-3 py-2.5 text-left font-medium">Dept</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Salary</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Sick days/yr</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {DATABASE_D.map(r => (
+                      <tr key={r.id} className="border-t border-gray-800 text-gray-300">
+                        <td className="px-3 py-2 font-mono">{r.name}</td>
+                        <td className="px-3 py-2 text-gray-400">{r.dept}</td>
+                        <td className="px-3 py-2 text-right">${r.salary.toLocaleString()}</td>
+                        <td className="px-3 py-2 text-right">{r.sick}</td>
+                      </tr>
+                    ))}
+                    {xAdded && (
+                      <tr className="border-t-2 border-indigo-500 bg-indigo-950/40">
+                        <td className="px-3 py-2 font-mono text-indigo-300">x</td>
+                        <td className="px-3 py-2 text-indigo-400/60 italic">private</td>
+                        <td className="px-3 py-2 text-right text-indigo-400/60 italic">private</td>
+                        <td className="px-3 py-2 text-right text-indigo-400/60 italic">private</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {xAdded && (
+                <p className="text-xs text-gray-500 italic">
+                  x's individual record is marked private — the analyst cannot read it.
+                </p>
+              )}
+            </div>
+
+            {/* Stats */}
+            <div className="space-y-2">
+              <div className="text-xs text-gray-500 uppercase tracking-wider">
+                Aggregate query results
+              </div>
+              <div className="space-y-2">
+                {STAT_DEFS.map(def => {
+                  const dVal  = STATS_D[def.key];
+                  const dxVal = STATS_DX[def.key];
+                  const changed = xAdded && dxVal !== dVal;
+                  const up = dxVal > dVal;
+                  return (
+                    <div key={def.key} className={`border rounded-lg px-4 py-3 transition-all duration-300 ${
+                      changed ? 'border-amber-700/70 bg-amber-950/20' : 'border-gray-700 bg-gray-800/40'
+                    }`}>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-gray-300">
+                          {def.icon}&nbsp; {def.label}
+                        </span>
+                        <div className="text-right">
+                          <span className="font-mono text-base font-bold text-gray-100">
+                            {def.fmt(xAdded ? dxVal : dVal)}
+                          </span>
+                          {changed && (
+                            <span className={`ml-2 text-xs font-mono font-bold ${up ? 'text-red-400' : 'text-emerald-400'}`}>
+                              {up ? '▲' : '▼'} {absDelta(def)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {!xAdded && (
+                        <div className="text-xs text-gray-600 font-mono mt-0.5">
+                          from D ({DATABASE_D.length} records)
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Action */}
+          {!xAdded ? (
+            <button
+              onClick={() => setXAdded(true)}
+              className="w-full py-3 rounded-lg border-2 border-dashed border-indigo-700/60 hover:border-indigo-500 hover:bg-indigo-950/30 text-indigo-400 hover:text-indigo-300 font-medium text-sm transition-all"
+            >
+              + x joins the company → update to D+x
+            </button>
+          ) : (
+            <div className="space-y-3">
+              <div className="bg-amber-950/40 border border-amber-800/60 rounded-lg p-4 text-sm text-amber-200/90 leading-relaxed">
+                <strong className="text-amber-300">Notice:</strong> by running the same 4 queries before and after x joined,
+                the analyst can see every highlighted change — without ever reading x's private record.
+                Can these changes reveal who x is?
+              </div>
+              <button
+                onClick={onContinue}
+                className="w-full py-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-colors"
+              >
+                Find out what can be inferred →
+              </button>
+            </div>
+          )}
+        </div>
       );
+    }
 
+    // ─── Phase 2: MCQA ───────────────────────────────────────────────────────
+    function PhaseMCQA({ onContinue }) {
       const [guesses,  setGuesses]  = useState({});
       const [revealed, setRevealed] = useState(false);
 
-      function handleSlider(e) {
-        setSliderVal(Number(e.target.value));
-        setGuesses({});
-        setRevealed(false);
-      }
+      const allAnswered = QUESTIONS.every(q => guesses[q.key] !== undefined);
+      const score = QUESTIONS.filter(q => guesses[q.key] === q.correct).length;
 
-      function guess(id, val) {
+      function guess(key, idx) {
         if (revealed) return;
-        setGuesses(g => ({ ...g, [id]: val }));
+        setGuesses(g => ({ ...g, [key]: idx }));
       }
 
-      const allGuessed = Object.keys(guesses).length === SNIPPETS.length;
-      const score = revealed
-        ? dpLosses.filter(s => (guesses[s.id] === 'member') === s.member).length
-        : null;
-
-      const aucLabel =
-        auc > 0.90 ? 'Attack nearly perfect — almost no protection' :
-        auc > 0.75 ? 'Attacker has a clear advantage' :
-        auc > 0.60 ? 'Some protection — attacker still beats random' :
-                     'Strong protection — close to random guessing';
+      // Delta summary shown at the top as reference
+      const deltas = [
+        { label: 'Mean salary', value: `$${Math.round(STATS_DX.avgSalary).toLocaleString()} (was $${Math.round(STATS_D.avgSalary).toLocaleString()}, +$${Math.round(STATS_DX.avgSalary - STATS_D.avgSalary).toLocaleString()})` },
+        { label: 'Eng. headcount', value: `${STATS_DX.engCount} (was ${STATS_D.engCount}, +1 · Sales: 0 · HR: 0)` },
+        { label: 'Mean sick days', value: `${STATS_DX.avgSick.toFixed(2)} (was ${STATS_D.avgSick.toFixed(2)}, −${(STATS_D.avgSick - STATS_DX.avgSick).toFixed(2)})` },
+      ];
 
       return (
-        <div className="space-y-6">
-          <p className="text-sm text-gray-400">
-            This model was trained with <strong className="text-white">DP-SGD</strong>: noise was added to gradients at every training step,
-            preventing the model from memorizing individual samples. Adjust ε to see the effect.
-          </p>
+        <div className="max-w-2xl mx-auto px-6 py-10">
+          <StepBar current={1} />
 
-          {/* Epsilon slider */}
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
-            <div className="flex justify-between text-xs text-gray-500">
-              <span>ε = 0.1 — strong protection</span>
-              <span>ε = 10 — no protection</span>
-            </div>
-            <input
-              type="range" min="0" max="100" step="0.5"
-              value={sliderVal}
-              onChange={handleSlider}
-              className="w-full accent-indigo-500 cursor-pointer"
-            />
-            <div className="flex items-baseline gap-3">
-              <span className="text-2xl font-mono font-bold text-indigo-300">ε = {epsilon.toFixed(2)}</span>
-              <span className="text-sm text-gray-400 italic">{aucLabel}</span>
-            </div>
-          </div>
-
-          {/* Distribution chart */}
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
-            <div className="flex items-center gap-5 text-xs">
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-1.5 rounded-full bg-indigo-400"></span>Members
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-1.5 rounded-full bg-orange-400"></span>Non-members
-              </span>
-              <span className="ml-auto text-gray-500">
-                Attack AUC: <span className={`font-mono font-bold ${auc > 0.75 ? 'text-red-400' : auc > 0.6 ? 'text-amber-400' : 'text-green-400'}`}>
-                  {auc.toFixed(3)}
-                </span>
-              </span>
-            </div>
-            <DistributionChart epsilon={epsilon} />
-            <p className="text-xs text-gray-500">
-              AUC = 1.0 is a perfect attack; AUC = 0.5 is random guessing. When the two curves overlap, the attacker cannot reliably distinguish a member from a non-member.
-            </p>
-          </div>
-
-          {/* Attack with DP scores */}
-          <div className="space-y-3">
+          <div className="space-y-2 mb-6">
+            <h2 className="text-2xl font-bold text-gray-100">What do the changes reveal?</h2>
             <p className="text-sm text-gray-400">
-              Now try the same attack with DP-adjusted loss scores (ε = {epsilon.toFixed(2)}):
+              Based solely on how the statistics shifted, infer x's private attributes.
             </p>
-            <div className="grid gap-3">
-              {dpLosses.map(s => (
-                <SnippetCard
-                  key={s.id}
-                  snippet={s}
-                  loss={s.loss}
-                  guess={guesses[s.id] ?? null}
-                  onGuess={val => guess(s.id, val)}
-                  revealed={revealed}
-                />
-              ))}
-            </div>
-            {allGuessed && !revealed && (
+          </div>
+
+          {/* Reference summary */}
+          <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 mb-6 space-y-1.5">
+            <div className="text-xs text-gray-500 uppercase tracking-wider mb-2">Observed changes (D → D+x)</div>
+            {deltas.map(d => (
+              <div key={d.label} className="flex items-baseline gap-2 text-xs">
+                <span className="text-gray-500 shrink-0">{d.label}:</span>
+                <span className="font-mono text-amber-300">{d.value}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Questions */}
+          <div className="space-y-5">
+            {QUESTIONS.map((q, qi) => {
+              const g = guesses[q.key];
+              return (
+                <div key={q.key} className="border border-gray-700 rounded-lg p-5 space-y-3">
+                  <div className="flex items-start gap-3">
+                    <span className="text-xs text-gray-600 font-mono mt-0.5 shrink-0">Q{qi + 1}</span>
+                    <p className="text-sm text-gray-200 leading-snug">{q.q}</p>
+                  </div>
+                  <div className="space-y-2">
+                    {q.options.map((opt, oi) => {
+                      const chosen  = g === oi;
+                      const correct = revealed && oi === q.correct;
+                      const wrong   = revealed && chosen && oi !== q.correct;
+                      return (
+                        <button
+                          key={oi}
+                          onClick={() => guess(q.key, oi)}
+                          className={`w-full text-left px-4 py-2.5 rounded-lg border text-sm transition-colors ${
+                            correct ? 'border-green-600 bg-green-950/40 text-green-300' :
+                            wrong   ? 'border-red-700  bg-red-950/30  text-red-300'   :
+                            chosen  ? 'border-indigo-600 bg-indigo-950/40 text-indigo-200' :
+                                      'border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-300'
+                          } ${revealed ? 'cursor-default' : 'cursor-pointer'}`}
+                        >
+                          <span className="text-xs text-gray-600 mr-2 font-mono">{String.fromCharCode(97 + oi)})</span>
+                          {opt}
+                          {correct && <span className="ml-2 text-green-400 text-xs">✓</span>}
+                          {wrong   && <span className="ml-2 text-red-400 text-xs">✗</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {revealed && (
+                    <div className="bg-gray-900 border border-gray-800 rounded px-3 py-2.5 text-xs text-gray-400 leading-relaxed">
+                      <span className="text-gray-500">The math: </span>{q.math}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Actions */}
+          <div className="mt-6 space-y-3">
+            {allAnswered && !revealed && (
               <button
                 onClick={() => setRevealed(true)}
-                className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-medium transition-colors"
+                className="w-full py-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-colors"
               >
-                Reveal results
+                Check answers
               </button>
             )}
+
             {revealed && (
-              <div className="bg-gray-800 border border-gray-700 rounded-lg p-5 space-y-2">
-                <div className="text-2xl font-bold">{score} / {SNIPPETS.length}</div>
-                <p className="text-sm text-gray-400">
-                  {score <= 4
-                    ? `At ε = ${epsilon.toFixed(2)}, DP training has suppressed the loss signal. Your attack is at or below chance — privacy is working.`
-                    : score <= 6
-                    ? `At ε = ${epsilon.toFixed(2)}, some signal remains. Try a lower ε for stronger protection.`
-                    : `At ε = ${epsilon.toFixed(2)}, the loss gap is still wide. The model isn't well-protected. Reduce ε.`}
-                </p>
-              </div>
+              <>
+                <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 space-y-3">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-bold">{score}/{QUESTIONS.length}</span>
+                    <span className="text-sm text-gray-400">
+                      {score === 3 ? '— Full profile recovered from aggregate statistics alone.' :
+                       score >= 2  ? '— Most of x\'s profile is recoverable.' :
+                                     '— Even partial inference is a real privacy violation.'}
+                    </span>
+                  </div>
+                  <div className="border-t border-gray-700 pt-3 space-y-1">
+                    <div className="text-xs text-gray-500 uppercase tracking-wider">x was:</div>
+                    <div className="flex flex-wrap gap-3 text-sm font-mono">
+                      <span className="text-indigo-300">{PERSON_X.name}</span>
+                      <span className="text-gray-400">·</span>
+                      <span className="text-gray-300">{PERSON_X.dept}</span>
+                      <span className="text-gray-400">·</span>
+                      <span className="text-gray-300">${PERSON_X.salary.toLocaleString()}/yr</span>
+                      <span className="text-gray-400">·</span>
+                      <span className="text-gray-300">{PERSON_X.sick} sick days/yr</span>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={onContinue}
+                  className="w-full py-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-colors"
+                >
+                  How does DP prevent this? →
+                </button>
+              </>
             )}
           </div>
         </div>
       );
     }
 
-    // ─── Tab 3: Privacy Loss Random Variable ─────────────────────────────────
-
-    function Tab3_PLRV({ onGoToResearch }) {
-      const sliderToEps = v => Math.pow(10, -1 + (v / 100) * 2);
-      const epsToSlider = e => ((Math.log10(e) + 1) / 2) * 100;
-      const [sliderVal, setSliderVal] = useState(epsToSlider(1.5));
+    // ─── Phase 3: DP Protection ───────────────────────────────────────────────
+    function PhaseDP({ onRestart }) {
+      const sliderToEps = v => Math.pow(10, -1 + (v / 100) * 2);  // 0.1 → 10
+      const [sliderVal, setSliderVal] = useState(50);              // starts at ε ≈ 1
+      const [seed, setSeed] = useState(0);
       const epsilon = sliderToEps(sliderVal);
 
+      // Re-sample on epsilon change OR manual re-randomize
+      const noisyD  = useMemo(() => sampleNoisyStats(STATS_D,  epsilon), [epsilon, seed]);
+      const noisyDX = useMemo(() => sampleNoisyStats(STATS_DX, epsilon), [epsilon, seed]);
+
+      const rows = STAT_DEFS.map(def => {
+        const noiseScale    = def.sensitivity / epsilon;
+        const noisyDVal     = noisyD[def.key];
+        const noisyDXVal    = noisyDX[def.key];
+        const observedDelta = noisyDXVal - noisyDVal;
+        const trueDelta     = STATS_DX[def.key] - STATS_D[def.key];
+        // "Revealing" if observed delta clearly exceeds the noise scale
+        const revealing = Math.abs(observedDelta) > 1.2 * noiseScale;
+        return { def, noisyDVal, noisyDXVal, observedDelta, trueDelta, noiseScale, revealing };
+      });
+
+      const anyRevealing = rows.some(r => r.revealing);
+
+      const label =
+        epsilon < 0.5  ? 'Strong protection — differences are swamped by noise' :
+        epsilon < 2    ? 'Moderate protection — some statistics are hidden' :
+        epsilon < 5    ? 'Weak protection — most statistics are still detectable' :
+                         'Minimal protection — noise barely masks the differences';
+
       return (
-        <div className="space-y-6">
-          <p className="text-sm text-gray-400">
-            The <strong className="text-white">privacy loss random variable</strong> ℒ(O) measures, for a specific model output O,
-            how much information it leaks about whether a given sample was used in training.
-            It is defined as the log-likelihood ratio:
-          </p>
+        <div className="max-w-3xl mx-auto px-6 py-10">
+          <StepBar current={2} />
 
-          <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 space-y-1 font-mono text-sm">
-            <div>
-              <span className="text-gray-400">ℒ(O) = ln </span>
-              <span className="text-indigo-300">P [ model(D<sub>train</sub>) = O ]</span>
-            </div>
-            <div className="pl-12 text-gray-600">─────────────────────────────</div>
-            <div className="pl-12">
-              <span className="text-orange-300">P [ model(D<sub>other</sub>) = O ]</span>
-            </div>
-            <div className="pt-1 text-xs text-gray-500">
-              A large positive ℒ(O) means the output is far more likely from a model that saw this sample — a strong membership signal.
-            </div>
-          </div>
-
-          <div className="text-sm text-gray-400">
-            ε-DP provides a <strong className="text-white">hard guarantee</strong>: the privacy loss random variable is bounded within [−ε, +ε] for every possible output. No output can serve as strong evidence of membership.
+          <div className="space-y-2 mb-8">
+            <h2 className="text-2xl font-bold text-gray-100">Adding differential privacy</h2>
+            <p className="text-sm text-gray-400 max-w-2xl">
+              Each query now returns a <strong className="text-white">noisy answer</strong> — Laplace noise calibrated to ε is added before the result is released.
+              At small ε, the outputs from D and D+x become <strong className="text-white">indistinguishable</strong>:
+              the analyst cannot reliably infer x's private values.
+            </p>
           </div>
 
           {/* Slider */}
-          <div className="space-y-2">
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6 space-y-3">
             <div className="flex justify-between text-xs text-gray-500">
-              <span>ε = 0.1 — tight bound</span>
-              <span>ε = 10 — loose bound</span>
+              <span>ε = 0.1 · high noise · strong privacy</span>
+              <span>ε = 10 · low noise · weak privacy</span>
             </div>
             <input
-              type="range" min="0" max="100" step="0.5"
+              type="range" min="0" max="100" step="1"
               value={sliderVal}
               onChange={e => setSliderVal(Number(e.target.value))}
               className="w-full accent-indigo-500 cursor-pointer"
             />
-            <span className="text-2xl font-mono font-bold text-indigo-300">ε = {epsilon.toFixed(2)}</span>
+            <div className="flex items-center gap-4">
+              <span className="text-2xl font-mono font-bold text-indigo-300">ε = {epsilon.toFixed(2)}</span>
+              <span className="text-xs text-gray-400 italic flex-1">{label}</span>
+              <button
+                onClick={() => setSeed(s => s + 1)}
+                className="text-xs text-gray-500 hover:text-gray-300 border border-gray-700 hover:border-gray-500 rounded px-2.5 py-1 transition-colors shrink-0"
+              >
+                ↺ new sample
+              </button>
+            </div>
           </div>
 
-          {/* PLRV chart */}
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
-            <div className="flex items-center gap-5 text-xs">
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-1.5 rounded-full bg-red-400"></span>No DP — PLRV unbounded
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-1.5 rounded-full bg-indigo-400"></span>DP-trained — bounded at ±ε
-              </span>
+          {/* Comparison table */}
+          <div className="space-y-2 mb-6">
+            <div className="text-xs text-gray-500 uppercase tracking-wider">
+              Noisy query results — what the analyst sees
             </div>
-            <PLRVChart epsilon={epsilon} />
-            <p className="text-xs text-gray-500">
-              The dashed lines mark ±ε. The DP-trained model's privacy loss distribution stays entirely within these bounds — the attacker's log-likelihood ratio is provably capped.
+            <div className="border border-gray-700 rounded-xl overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-800/80 text-xs text-gray-400">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-medium">Statistic</th>
+                    <th className="px-4 py-3 text-right font-medium font-mono">D + noise</th>
+                    <th className="px-4 py-3 text-right font-medium font-mono">D+x + noise</th>
+                    <th className="px-4 py-3 text-right font-medium">Observed Δ</th>
+                    <th className="px-4 py-3 text-center font-medium">Detectable?</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(({ def, noisyDVal, noisyDXVal, observedDelta, trueDelta, noiseScale, revealing }) => (
+                    <tr key={def.key} className="border-t border-gray-800">
+                      <td className="px-4 py-3 text-gray-300 text-xs">{def.icon} {def.label}</td>
+                      <td className="px-4 py-3 text-right font-mono text-gray-400 text-xs">{def.fmt(noisyDVal)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-gray-400 text-xs">{def.fmt(noisyDXVal)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-xs">
+                        <span className={observedDelta >= 0 ? 'text-red-400' : 'text-emerald-400'}>
+                          {observedDelta >= 0 ? '+' : '−'}{def.fmt(Math.abs(observedDelta))}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
+                          revealing
+                            ? 'text-red-300 bg-red-950/60 border-red-800'
+                            : 'text-green-300 bg-green-950/60 border-green-800'
+                        }`}>
+                          {revealing ? 'Yes' : 'Hidden'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-gray-600">
+              "Detectable" = observed Δ exceeds the noise scale (Δf / ε). When hidden, the noise is larger than the true signal — x cannot be distinguished from the baseline.
             </p>
           </div>
 
-          <div className="bg-indigo-950 border border-indigo-800 rounded-lg p-4 space-y-2">
-            <div className="text-sm font-medium text-indigo-100">Formal guarantee (ε-DP)</div>
-            <div className="font-mono text-xs text-indigo-300">
-              P [ ℒ(O) {'>'} ε ] = 0 &nbsp;&nbsp; for all outputs O
+          {/* True deltas for reference */}
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-8">
+            <div className="text-xs text-gray-500 uppercase tracking-wider mb-3">True signal (hidden from analyst)</div>
+            <div className="grid grid-cols-2 gap-x-8 gap-y-1.5">
+              {STAT_DEFS.map(def => {
+                const row = rows.find(r => r.def.key === def.key);
+                return (
+                  <div key={def.key} className="flex justify-between items-baseline text-xs">
+                    <span className="text-gray-500">{def.label}</span>
+                    <span className="font-mono text-gray-300">
+                      true Δ = {row.trueDelta >= 0 ? '+' : '−'}{def.fmt(Math.abs(row.trueDelta))}
+                      <span className="text-gray-600 ml-1">· noise scale ≈ {def.fmt(row.noiseScale)}</span>
+                    </span>
+                  </div>
+                );
+              })}
             </div>
-            <p className="text-xs text-indigo-300/70">
-              This connects directly to the membership inference attack: an attacker's advantage is bounded by e<sup>ε</sup> − 1, which approaches 0 as ε → 0.
+          </div>
+
+          {/* Takeaway */}
+          <div className="border border-indigo-800/60 bg-indigo-950/20 rounded-xl p-5 mb-6 space-y-3">
+            <div className="text-sm font-semibold text-indigo-200">The core guarantee of ε-DP</div>
+            <p className="text-sm text-gray-400 leading-relaxed">
+              For any query output <em>O</em>, the probability of seeing <em>O</em> from database D
+              versus D+x differs by at most a factor of e<sup>ε</sup>.
+              At small ε, this factor is close to 1 — D and D+x are nearly indistinguishable,
+              no matter what the analyst observes.
             </p>
+            <div className="font-mono text-xs text-indigo-300 bg-indigo-950/40 rounded px-3 py-2">
+              P[M(D) = O] ≤ e<sup>ε</sup> · P[M(D+x) = O] &nbsp;&nbsp; for all outputs O
+            </div>
           </div>
 
           <button
-            onClick={onGoToResearch}
-            className="w-full text-xs text-gray-600 hover:text-indigo-400 py-2 border border-gray-800 rounded transition-colors"
+            onClick={onRestart}
+            className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
           >
-            How do you verify this bound holds on a deployed model? → See the Research tab
+            ← Start over
           </button>
-        </div>
-      );
-    }
-
-    // ─── Research papers ──────────────────────────────────────────────────────
-
-    const PAPERS = [
-      {
-        id: 'Jf40H5pRW0',
-        venue: 'NeurIPS 2024',
-        venueCls: 'text-purple-300 bg-purple-950 border-purple-800',
-        url: 'https://openreview.net/forum?id=Jf40H5pRW0',
-        title: 'Open LLMs are Necessary for Current Private Adaptations and Outperform their Closed Alternatives',
-        question: 'Can we privately adapt closed LLMs like GPT-4?',
-        finding: 'No. All four leading methods for privately adapting closed API models leak private data to the provider. Open-weight LLMs with local DP fine-tuning outperform closed alternatives by up to 26% absolute accuracy — at lower monetary cost.',
-        connection: 'Explains why DP-SGD must be run locally. Closed API models are architecturally incapable of providing true privacy guarantees.',
-      },
-      {
-        id: 'jY7fAo9rfK',
-        venue: 'ICLR 2025',
-        venueCls: 'text-sky-300 bg-sky-950 border-sky-800',
-        url: 'https://openreview.net/forum?id=jY7fAo9rfK',
-        title: 'Benchmarking Empirical Privacy Protection for Adaptations of Large Language Models',
-        question: 'Does DP actually protect against membership inference in practice?',
-        finding: 'It depends heavily on data distribution. Fine-tuning on data similar to the pretraining corpus is far riskier at the same ε. LoRA + DP achieves the best empirical protection for out-of-distribution data, but the theoretical guarantee often overstates real-world protection.',
-        connection: 'Validates the loss-score attack from Tab 1 on real models — and shows that the same ε can mean very different levels of actual risk depending on what data was used.',
-      },
-      {
-        id: 'doaAUf9Pi7',
-        venue: 'ICLR 2025',
-        venueCls: 'text-sky-300 bg-sky-950 border-sky-800',
-        url: 'https://openreview.net/forum?id=doaAUf9Pi7',
-        title: 'Natural Identifiers for Privacy and Data Audits in Large Language Models',
-        question: 'How do you verify DP compliance on a model that is already deployed?',
-        finding: 'Standard auditing inserts synthetic canaries during training — impractical post-hoc. Natural identifiers (NIDs), structured strings like cryptographic hashes that already appear in training data, serve as unlimited same-distribution canaries for auditing deployed models without any retraining.',
-        connection: 'Bridges the gap between the formal ε bound shown in Privacy Loss and actually verifying it holds on a live model.',
-      },
-      {
-        id: 'SPz7hBeFUw',
-        venue: 'ICML 2025',
-        venueCls: 'text-amber-300 bg-amber-950 border-amber-800',
-        url: 'https://openreview.net/forum?id=SPz7hBeFUw',
-        title: 'Efficient and Privacy-Preserving Soft Prompt Transfer for LLMs (POST)',
-        question: 'DP fine-tuning on large models is expensive — can we make it practical?',
-        finding: 'POST distills a small local model from the large LLM, tunes soft prompts privately on the small model, then transfers them to the full LLM using only public data. Strong privacy and accuracy are maintained while dramatically reducing compute — and private data never leaves the user.',
-        connection: 'Addresses the practical bottleneck: DP-SGD on large models is computationally heavy. POST makes private LLM adaptation viable at scale.',
-      },
-    ];
-
-    function Tab4_Research({ setActiveTab }) {
-      return (
-        <div className="space-y-6">
-          <p className="text-sm text-gray-400">
-            The attack and defense you explored are not hypothetical. Below is a sequence of research questions the field had to answer — each paper building on the last.
-          </p>
-
-          {/* Arc */}
-          <div className="flex flex-wrap gap-2 items-center text-xs text-gray-500">
-            {['Are closed LLMs safe?', 'Does DP hold in practice?', 'Can we audit deployed models?', 'Can we make DP efficient?'].map((q, i, arr) => (
-              <React.Fragment key={q}>
-                <span className="px-2.5 py-1 bg-gray-800 border border-gray-700 rounded-full">{q}</span>
-                {i < arr.length - 1 && <span className="text-gray-700">→</span>}
-              </React.Fragment>
-            ))}
-          </div>
-
-          {/* Paper cards */}
-          <div className="space-y-4">
-            {PAPERS.map((p, i) => (
-              <div key={p.id} className="border border-gray-700 bg-gray-900/50 rounded-lg p-5 space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs font-mono px-2 py-0.5 rounded border ${p.venueCls}`}>{p.venue}</span>
-                      <span className="text-xs text-gray-600">#{i + 1}</span>
-                    </div>
-                    <div className="text-sm font-semibold text-gray-100 leading-snug">{p.title}</div>
-                  </div>
-                  <a href={p.url} target="_blank" rel="noopener noreferrer"
-                    className="text-xs text-indigo-400 hover:text-indigo-300 underline whitespace-nowrap shrink-0 mt-1">
-                    OpenReview ↗
-                  </a>
-                </div>
-
-                <div className="space-y-0.5">
-                  <div className="text-xs text-gray-500 uppercase tracking-wider">Research question</div>
-                  <p className="text-sm text-gray-300 italic">"{p.question}"</p>
-                </div>
-
-                <div className="space-y-0.5">
-                  <div className="text-xs text-gray-500 uppercase tracking-wider">Key finding</div>
-                  <p className="text-sm text-gray-300 leading-relaxed">{p.finding}</p>
-                </div>
-
-                <div className="flex items-start gap-2 bg-gray-800 border border-gray-700 rounded px-3 py-2">
-                  <span className="text-indigo-400 text-xs mt-0.5 shrink-0">↳</span>
-                  <span className="text-xs text-gray-400">{p.connection}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="border-t border-gray-800 pt-4 text-xs text-gray-600">
-            All papers from the{' '}
-            <a href="https://sprintml.com" target="_blank" rel="noopener noreferrer"
-              className="text-indigo-500 hover:text-indigo-400 underline">sprintml</a> research group.
-          </div>
-        </div>
-      );
-    }
-
-    // ─── Takeaway ─────────────────────────────────────────────────────────────
-
-    function Takeaway({ onRestart }) {
-      const takeaways = generateTakeaways();
-      const apps = [
-        ['GPT / large language models',
-         'Memorization of training text is a documented vulnerability — models have reproduced verbatim passages from books, code, and personal data. DP-SGD is an active area of mitigation research.'],
-        ['Medical AI',
-         'Models trained on patient records can inadvertently leak diagnoses. DP training lets hospitals jointly train diagnostic models without sharing raw records.'],
-        ['On-device personalization',
-         'Apple and Google use DP to fine-tune keyboard and voice models on user devices without raw keystrokes or audio ever leaving the phone.'],
-      ];
-
-      return (
-        <div className="min-h-screen flex items-center justify-center px-8 py-16">
-          <div className="max-w-2xl w-full space-y-10">
-            <h2 className="text-3xl font-bold">What you just experienced</h2>
-            <ol className="space-y-5">
-              {takeaways.map((t, i) => (
-                <li key={i} className="flex gap-4">
-                  <span className="text-indigo-400 font-bold text-lg leading-snug shrink-0">{i + 1}.</span>
-                  <span className="text-gray-300 leading-relaxed">{t}</span>
-                </li>
-              ))}
-            </ol>
-            <div className="border-t border-gray-800 pt-8 space-y-4">
-              <div className="text-xs text-gray-500 uppercase tracking-widest">In real AI systems</div>
-              <div className="space-y-3">
-                {apps.map(([name, desc]) => (
-                  <div key={name} className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 space-y-0.5">
-                    <div className="text-sm font-medium text-gray-200">{name}</div>
-                    <div className="text-sm text-gray-400">{desc}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="border-t border-gray-800 pt-8 space-y-4">
-              <div className="text-xs text-gray-500 uppercase tracking-widest">Advancing the field</div>
-              <p className="text-sm text-gray-400">
-                Recent research from the{' '}
-                <a href="https://sprintml.com" target="_blank" rel="noopener noreferrer" className="text-indigo-400 underline hover:text-indigo-300">sprintml</a>
-                {' '}group has shown that closed LLM APIs are fundamentally unable to provide privacy guarantees
-                (NeurIPS 2024), that DP's practical protection varies widely by data distribution (ICLR 2025),
-                that already-deployed models can be audited using natural identifiers without retraining (ICLR 2025),
-                and that efficient DP fine-tuning is achievable by tuning small models and transferring prompts to large ones (ICML 2025).
-              </p>
-            </div>
-            <button
-              onClick={onRestart}
-              className="px-6 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
-            >
-              Start over
-            </button>
-          </div>
         </div>
       );
     }
 
     // ─── App ─────────────────────────────────────────────────────────────────
-
-    const TABS = ['The Attack', 'The Defense', 'Privacy Loss', 'Research'];
-
     function App() {
-      const [phase,     setPhase]     = useState('landing');
-      const [activeTab, setActiveTab] = useState(0);
+      const [phase, setPhase] = useState('landing');
 
-      if (phase === 'landing') {
-        return (
-          <div className="min-h-screen flex flex-col items-center justify-center text-center px-8 gap-6">
-            <h1 className="text-4xl sm:text-5xl font-bold text-gray-100 max-w-xl leading-tight">
-              AI models remember more<br className="hidden sm:block"/> than you think.
-            </h1>
-            <p className="text-gray-400 max-w-md text-sm leading-relaxed">
-              Language models trained on sensitive data can leak it. A simple loss-score attack can identify what was in the training set.
-              Differential privacy can stop this — but there is a cost.
-            </p>
-            <button
-              onClick={() => setPhase('main')}
-              className="px-8 py-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-base font-medium transition-colors"
-            >
-              Find out
-            </button>
-          </div>
-        );
-      }
-
-      if (phase === 'takeaway') {
-        return <Takeaway onRestart={() => { setPhase('landing'); setActiveTab(0); }} />;
-      }
-
-      return (
-        <div className="min-h-screen flex flex-col">
-          {/* Top bar */}
-          <div className="sticky top-0 z-50 bg-gray-900/95 backdrop-blur border-b border-gray-800">
-            <div className="max-w-3xl mx-auto px-6 py-3 flex items-center justify-between">
-              <span className="text-xs text-gray-500 hidden sm:block">LLM Privacy &amp; Differential Privacy</span>
-              <button
-                onClick={() => setPhase('takeaway')}
-                className="text-xs px-3 py-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white transition-colors ml-auto"
-              >
-                Wrap up →
-              </button>
-            </div>
-          </div>
-
-          <div className="flex-1 max-w-3xl mx-auto w-full px-6 py-8">
-            {/* Tab bar */}
-            <div className="flex border-b border-gray-800 mb-8">
-              {TABS.map((label, i) => (
-                <button
-                  key={i}
-                  onClick={() => setActiveTab(i)}
-                  className={`px-5 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                    activeTab === i
-                      ? 'border-indigo-500 text-indigo-300'
-                      : 'border-transparent text-gray-500 hover:text-gray-300'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {activeTab === 0 && <Tab1_Attack onGoToResearch={() => setActiveTab(3)} />}
-            {activeTab === 1 && <Tab2_Defense />}
-            {activeTab === 2 && <Tab3_PLRV onGoToResearch={() => setActiveTab(3)} />}
-            {activeTab === 3 && <Tab4_Research setActiveTab={setActiveTab} />}
-          </div>
-        </div>
-      );
+      if (phase === 'landing') return <Landing  onStart={()    => setPhase('compare')} />;
+      if (phase === 'compare') return <PhaseCompare onContinue={() => setPhase('mcqa')} />;
+      if (phase === 'mcqa')    return <PhaseMCQA    onContinue={() => setPhase('dp')}   />;
+      if (phase === 'dp')      return <PhaseDP      onRestart={()  => setPhase('landing')} />;
     }
 
     ReactDOM.createRoot(document.getElementById('root')).render(<App />);
