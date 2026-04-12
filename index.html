@@ -54,9 +54,18 @@
     const STATS_DX = computeStats(DATABASE_DX);  // avgSalary≈82813, avgSick≈6.00, eng=7, max=145000
 
     const STAT_DEFS = [
-      { key:'avgSalary', label:'Mean salary', icon:'💼',
+      { key:'avgSalary', label:'Mean salary',           icon:'💼',
         fmt: v => `$${Math.round(v).toLocaleString()}`,
         sensitivity: 145000 / DATABASE_DX.length },
+      { key:'avgSick',   label:'Mean sick days / yr',   icon:'🏥',
+        fmt: v => v.toFixed(2),
+        sensitivity: 30 / DATABASE_DX.length },
+      { key:'engCount',  label:'Engineering headcount', icon:'👥',
+        fmt: v => String(Math.round(v)),
+        sensitivity: 1 },
+      { key:'maxSalary', label:'Highest salary',        icon:'📈',
+        fmt: v => `$${Math.round(v).toLocaleString()}`,
+        sensitivity: 145000 },
     ];
 
     // ─── DP Math ──────────────────────────────────────────────────────────────
@@ -220,7 +229,7 @@
 
     // ─── Step bar ─────────────────────────────────────────────────────────────
     function StepBar({ current, onStep }) {
-      const steps = ['D vs D+x', 'Infer x', 'DP', 'ML model'];
+      const steps = ['D vs D+x', 'Infer x', 'DP', 'ML model', 'Research'];
       return (
         <div className="flex items-center gap-1 mb-8">
           {steps.map((s, i) => (
@@ -467,43 +476,43 @@
     // ─── Phase 3: DP ─────────────────────────────────────────────────────────
     function PhaseDP({ onContinue, onRestart, goToStep }) {
       const sliderToEps = v => Math.pow(10, -1 + (v / 100) * 2);
-      const [sliderVal, setSliderVal] = useState(50);
+      const [sliderVal, setSliderVal] = useState(85);
       const [seed, setSeed] = useState(0);
       const epsilon = sliderToEps(sliderVal);
 
       const noisyD  = useMemo(() => sampleNoisyStats(STATS_D,  epsilon), [epsilon, seed]);
       const noisyDX = useMemo(() => sampleNoisyStats(STATS_DX, epsilon), [epsilon, seed]);
 
-      const rows = STAT_DEFS.map(def => {
-        const scale   = def.sensitivity / epsilon;
-        const vD      = noisyD[def.key];
-        const vDX     = noisyDX[def.key];
-        const obsDelta = vDX - vD;
-        const hidden  = Math.abs(obsDelta) <= 1.5 * scale;
-        return { def, vD, vDX, obsDelta, trueDelta: STATS_DX[def.key] - STATS_D[def.key], scale, hidden };
-      });
+      const def        = STAT_DEFS[0];
+      const scale      = def.sensitivity / epsilon;
+      const vD         = noisyD.avgSalary;
+      const vDX        = noisyDX.avgSalary;
+      const obsDelta   = vDX - vD;
+      const trueDelta  = STATS_DX.avgSalary - STATS_D.avgSalary;   // ≈ $4,146
+      const hidden     = Math.abs(obsDelta) <= 1.5 * scale;
+      // How much of the true signal is recoverable (clamped 0–1, inverted for "utility")
+      const signalRatio = Math.min(1, Math.abs(obsDelta) / (1.5 * scale));
 
-      const hiddenCount = rows.filter(r => r.hidden).length;
       const protection =
-        epsilon < 0.5 ? 'Strong — all signals swamped by noise' :
-        epsilon < 2   ? 'Moderate — most signals hidden' :
-        epsilon < 5   ? 'Weak — signals often detectable' :
-                        'Minimal — noise barely masks differences';
+        epsilon < 0.5 ? "Strong — x's salary is hidden in noise" :
+        epsilon < 2   ? "Moderate — signal may still be detectable" :
+        epsilon < 5   ? "Weak — salary change visible to analyst" :
+                        "Minimal — salary change fully exposed";
 
       return (
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+        <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8">
           <StepBar current={2} onStep={goToStep} />
           <h2 className="text-xl font-bold mb-1">Differential privacy</h2>
           <p className="text-xs text-gray-500 mb-6">
-            Every query answer is perturbed with Laplace noise scaled to ε.
-            At small ε, D and D+x become indistinguishable.
+            Add Laplace noise to every query answer. At small ε the reported salary averages for D and D+x
+            become indistinguishable — x's exact salary can no longer be recovered.
           </p>
 
           {/* Slider */}
-          <div className="border border-gray-800 rounded-xl p-4 mb-4 space-y-2">
+          <div className="border border-gray-800 rounded-xl p-4 mb-5 space-y-2">
             <div className="flex justify-between text-[10px] text-gray-600 uppercase tracking-wider">
               <span>← high privacy (ε = 0.1)</span>
-              <span>low privacy (ε = 10) →</span>
+              <span>no privacy (ε = 10) →</span>
             </div>
             <input type="range" min="0" max="100" step="1" value={sliderVal}
               onChange={e => setSliderVal(Number(e.target.value))}
@@ -518,64 +527,70 @@
             </div>
           </div>
 
-          {/* Table */}
-          <div className="border border-gray-800 rounded-xl overflow-hidden mb-4">
-            <table className="w-full text-xs">
-              <thead className="bg-gray-900 text-gray-600">
-                <tr>
-                  <th className="px-3 py-2.5 text-left font-medium">Statistic</th>
-                  <th className="px-3 py-2.5 text-right font-mono">D + noise</th>
-                  <th className="px-3 py-2.5 text-right font-mono">D+x + noise</th>
-                  <th className="px-3 py-2.5 text-right">Observed Δ</th>
-                  <th className="px-3 py-2.5 text-right">Noise scale</th>
-                  <th className="px-3 py-2.5 text-center">Hidden?</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map(({ def, vD, vDX, obsDelta, trueDelta, scale, hidden }) => (
-                  <tr key={def.key} className="border-t border-gray-800/60 hover:bg-gray-900/30">
-                    <td className="px-3 py-2.5 text-gray-400">{def.icon} {def.label}</td>
-                    <td className="px-3 py-2.5 text-right font-mono text-gray-400">{def.fmt(vD)}</td>
-                    <td className="px-3 py-2.5 text-right font-mono text-gray-400">{def.fmt(vDX)}</td>
-                    <td className={`px-3 py-2.5 text-right font-mono font-semibold ${obsDelta>=0?'text-red-400':'text-emerald-400'}`}>
-                      {obsDelta>=0?'+':'−'}{def.fmt(Math.abs(obsDelta))}
-                    </td>
-                    <td className="px-3 py-2.5 text-right font-mono text-gray-600">
-                      ±{def.fmt(scale)}
-                    </td>
-                    <td className="px-3 py-2.5 text-center">
-                      <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                        hidden
-                          ? 'text-green-300 bg-green-950/60 border-green-900'
-                          : 'text-red-300  bg-red-950/60  border-red-900'}`}>
-                        {hidden ? 'Yes' : 'No'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {/* Two salary cards */}
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            {[
+              { label: 'D — 15 employees', noisy: vD, true_: STATS_D.avgSalary },
+              { label: 'D+x — 16 employees', noisy: vDX, true_: STATS_DX.avgSalary },
+            ].map(({ label, noisy, true_ }) => (
+              <div key={label} className="border border-gray-800 rounded-xl p-4">
+                <div className="text-[10px] text-gray-600 uppercase tracking-wider mb-2">{label}</div>
+                <div className="font-mono text-2xl font-bold text-gray-100">{def.fmt(noisy)}</div>
+                <div className="text-[10px] text-gray-700 mt-1 font-mono">true: {def.fmt(true_)}</div>
+              </div>
+            ))}
           </div>
 
-          {/* Summary pill */}
-          <div className={`rounded-xl p-3 mb-6 text-sm text-center font-medium border transition-colors ${
-            hiddenCount === 4 ? 'bg-green-950/30 border-green-900 text-green-300' :
-            hiddenCount >= 2  ? 'bg-amber-950/30 border-amber-900 text-amber-300' :
-                                'bg-red-950/30   border-red-900   text-red-300'}`}>
-            {hiddenCount}/4 statistics hidden from the analyst at ε = {epsilon.toFixed(2)}
+          {/* Signal vs noise panel */}
+          <div className={`border rounded-xl p-5 mb-5 transition-colors duration-500 ${
+            hidden ? 'border-green-900/60 bg-green-950/15' : 'border-red-900/60 bg-red-950/15'}`}>
+
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <div className="text-[10px] text-gray-600 uppercase tracking-wider mb-1">Reported salary change</div>
+                <div className={`font-mono text-3xl font-bold ${obsDelta >= 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                  {obsDelta >= 0 ? '+' : '−'}{def.fmt(Math.abs(obsDelta))}
+                </div>
+                <div className="text-[10px] text-gray-600 mt-1">true signal: <span className="text-amber-500 font-mono">+{def.fmt(trueDelta)}</span></div>
+              </div>
+              <div className="text-right">
+                <div className="text-[10px] text-gray-600 uppercase tracking-wider mb-1">Noise scale</div>
+                <div className="font-mono text-xl text-gray-400">±{def.fmt(scale)}</div>
+                <div className="text-[10px] text-gray-700 mt-1">Laplace(0, Δf/ε)</div>
+              </div>
+            </div>
+
+            {/* Signal-to-noise bar */}
+            <div className="mb-3">
+              <div className="flex justify-between text-[9px] text-gray-700 mb-1 uppercase tracking-wider">
+                <span>Signal vs noise</span>
+                <span>{hidden ? 'signal buried' : 'signal visible'}</span>
+              </div>
+              <div className="h-2.5 bg-gray-800 rounded-full overflow-hidden">
+                <div className={`h-full rounded-full transition-all duration-500 ${hidden ? 'bg-green-700' : 'bg-red-600'}`}
+                  style={{ width: `${Math.round(signalRatio * 100)}%` }} />
+              </div>
+            </div>
+
+            <div className={`rounded-lg py-3 px-4 text-center font-semibold text-sm transition-colors duration-500 ${
+              hidden ? 'bg-green-900/30 text-green-300' : 'bg-red-900/30 text-red-300'}`}>
+              {hidden
+                ? "✓  Noise swamps the signal — x's salary is unrecoverable"
+                : "✗  Signal still detectable — analyst can back-calculate x's salary"}
+            </div>
           </div>
 
           {/* Formal guarantee */}
-          <div className="border border-indigo-900/50 bg-indigo-950/20 rounded-xl p-4 mb-6">
-            <div className="text-[10px] text-indigo-600 uppercase tracking-wider mb-2">Core guarantee of ε-DP</div>
+          <div className="border border-indigo-900/40 bg-indigo-950/20 rounded-xl p-4 mb-6">
+            <div className="text-[10px] text-indigo-600 uppercase tracking-wider mb-2">Formal ε-DP guarantee</div>
             <div className="font-mono text-sm text-indigo-300">
-              P[M(D) = O] ≤ e<sup>ε</sup> · P[M(D+x) = O] &nbsp; for all outputs O
+              P[M(D) = O] ≤ e<sup>ε</sup> · P[M(D+x) = O] &nbsp;&nbsp; ∀ outputs O
             </div>
             <p className="text-xs text-gray-600 mt-2">
-              At ε = {epsilon.toFixed(2)}, query outputs can differ by at most a factor of {Math.exp(epsilon).toFixed(2)}.
-              {Math.exp(epsilon) < 1.5 ? ' D and D+x are nearly indistinguishable.' :
-               Math.exp(epsilon) < 5   ? ' Some signal still leaks through.' :
-                                         ' Large factor — x is not well protected.'}
+              At ε = {epsilon.toFixed(2)}, D and D+x produce outputs within a factor of {Math.exp(epsilon).toFixed(2)} of each other.
+              {Math.exp(epsilon) < 1.5 ? ' Practically indistinguishable.' :
+               Math.exp(epsilon) < 5   ? ' Some distinguishability remains.' :
+                                         ' Easily distinguished — x is exposed.'}
             </p>
           </div>
 
@@ -594,7 +609,7 @@
     }
 
     // ─── Phase 4: ML model ───────────────────────────────────────────────────
-    function PhaseML({ onRestart, goToStep }) {
+    function PhaseML({ onContinue, onRestart, goToStep }) {
       const sliderToEps = v => Math.pow(10, -1 + (v / 100) * 2);
       const [sliderVal, setSliderVal] = useState(80);
       const epsilon = sliderToEps(sliderVal);
@@ -759,15 +774,105 @@
             </div>
           </div>
 
-          <div className="mt-6 flex items-center justify-between">
+          <div className="mt-6 flex items-center gap-4">
             <button onClick={onRestart}
               className="text-xs text-gray-700 hover:text-gray-500 transition-colors">
               ← Start over
             </button>
-            <div className="text-[10px] text-gray-700 italic text-right max-w-sm">
-              DP-SGD (Abadi et al. 2016) is the standard mechanism for training differentially private ML models.
-              The same ε budget governs both attacks.
+            <button onClick={onContinue}
+              className="ml-auto px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm font-medium transition-colors">
+              Why this matters for AI research →
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── Phase 5: Research ───────────────────────────────────────────────────
+    function PhaseResearch({ onRestart, goToStep }) {
+      return (
+        <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8">
+          <StepBar current={4} onStep={goToStep} />
+          <h2 className="text-xl font-bold mb-1">From HR databases to foundation models</h2>
+          <p className="text-xs text-gray-500 mb-6">
+            The same privacy risk — at the scale of the entire internet.
+          </p>
+
+          <div className="space-y-4">
+
+            <div className="border border-gray-800 rounded-xl p-5">
+              <div className="flex items-start gap-4">
+                <span className="text-2xl shrink-0">🌐</span>
+                <div>
+                  <h3 className="font-semibold text-gray-100 mb-1.5">Foundation models train on everything</h3>
+                  <p className="text-sm text-gray-400 leading-relaxed">
+                    GPT-4, Llama, Gemini — trained on trillions of tokens from the open web, including medical
+                    forums, legal documents, financial records, and private communications. The
+                    "x joins the database" problem now involves billions of individuals, none of whom consented.
+                  </p>
+                </div>
+              </div>
             </div>
+
+            <div className="border border-gray-800 rounded-xl p-5">
+              <div className="flex items-start gap-4">
+                <span className="text-2xl shrink-0">🔓</span>
+                <div>
+                  <h3 className="font-semibold text-gray-100 mb-1.5">Memorization attacks are real and proven</h3>
+                  <p className="text-sm text-gray-400 leading-relaxed">
+                    Carlini et al. (2021) extracted verbatim text from GPT-2 — names, phone numbers, addresses —
+                    using only public API access. The text completion exercise above is a simplified version
+                    of this exact attack. Membership inference against fine-tuned models regularly exceeds 80% accuracy.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="border border-gray-800 rounded-xl p-5">
+              <div className="flex items-start gap-4">
+                <span className="text-2xl shrink-0">⚖️</span>
+                <div>
+                  <h3 className="font-semibold text-gray-100 mb-1.5">DP-SGD works — but at a steep cost</h3>
+                  <p className="text-sm text-gray-400 leading-relaxed">
+                    Differentially private training (Abadi et al. 2016) clips and noises gradients during
+                    backpropagation, providing formal guarantees. But at the scale of large foundation models
+                    the utility loss is severe, and the correct privacy budget ε for real-world deployment
+                    remains an open question.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="border border-indigo-900/40 bg-indigo-950/20 rounded-xl p-5">
+              <div className="flex items-start gap-4">
+                <span className="text-2xl shrink-0">🔬</span>
+                <div>
+                  <h3 className="font-semibold text-indigo-200 mb-1.5">The open problem</h3>
+                  <p className="text-sm text-gray-400 leading-relaxed">
+                    Can we fine-tune or train large foundation models on sensitive data — medical records,
+                    financial data, private text — while providing meaningful differential privacy guarantees
+                    without destroying their usefulness? This requires new theory on the privacy-utility
+                    frontier at scale, tighter composition bounds, and better auditing tools to verify
+                    what ε values actually mean in practice.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {['DP fine-tuning', 'Privacy auditing', 'Tight composition', 'DP synthetic data', 'Membership inference'].map(t => (
+                      <span key={t} className="text-[11px] bg-indigo-950/60 border border-indigo-900/40 text-indigo-400 rounded-full px-2.5 py-1">
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <div className="mt-6">
+            <button onClick={onRestart}
+              className="text-xs text-gray-700 hover:text-gray-500 transition-colors">
+              ← Start over
+            </button>
           </div>
         </div>
       );
@@ -776,13 +881,14 @@
     // ─── App ─────────────────────────────────────────────────────────────────
     function App() {
       const [phase, setPhase] = useState('landing');
-      const PHASES = ['compare', 'mcqa', 'dp', 'ml'];
+      const PHASES = ['compare', 'mcqa', 'dp', 'ml', 'research'];
       const goToStep = i => setPhase(PHASES[i]);
-      if (phase==='landing') return <Landing      onStart={()    => setPhase('compare')} />;
-      if (phase==='compare') return <PhaseCompare onContinue={() => setPhase('mcqa')} goToStep={goToStep} />;
-      if (phase==='mcqa')    return <PhaseMCQA    onContinue={() => setPhase('dp')}   goToStep={goToStep} />;
-      if (phase==='dp')      return <PhaseDP      onContinue={() => setPhase('ml')} onRestart={() => setPhase('landing')} goToStep={goToStep} />;
-      if (phase==='ml')      return <PhaseML      onRestart={() => setPhase('landing')} goToStep={goToStep} />;
+      if (phase==='landing')  return <Landing         onStart={()    => setPhase('compare')} />;
+      if (phase==='compare')  return <PhaseCompare    onContinue={() => setPhase('mcqa')}     goToStep={goToStep} />;
+      if (phase==='mcqa')     return <PhaseMCQA       onContinue={() => setPhase('dp')}       goToStep={goToStep} />;
+      if (phase==='dp')       return <PhaseDP         onContinue={() => setPhase('ml')} onRestart={() => setPhase('landing')} goToStep={goToStep} />;
+      if (phase==='ml')       return <PhaseML         onContinue={() => setPhase('research')} onRestart={() => setPhase('landing')} goToStep={goToStep} />;
+      if (phase==='research') return <PhaseResearch   onRestart={() => setPhase('landing')}   goToStep={goToStep} />;
     }
 
     ReactDOM.createRoot(document.getElementById('root')).render(<App />);
