@@ -745,6 +745,9 @@
           } else if (e.key === 'ArrowLeft') {
             const prev = [...PRESETS].reverse().find(v => v < sliderVal);
             if (prev !== undefined) setSliderVal(prev);
+          } else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            setSeed(s => s + 1);
           }
         }
         window.addEventListener('keydown', onKey);
