@@ -84,7 +84,8 @@
       { id:15, name:'Oscar M.',   dept:'HR',          salary:63000,  sick:7 },
     ];
 
-    const PERSON_X = { id:16, name:'Morgan X.', dept:'Engineering', salary:145000, sick:2 };
+    // x earns $200,000 — revealed only after the quiz
+    const PERSON_X = { id:16, name:'Morgan X.', dept:'Engineering', salary:200000, sick:2 };
     const DATABASE_DX = [...DATABASE_D, PERSON_X];
 
     // ─── Statistics ───────────────────────────────────────────────────────────
@@ -98,33 +99,26 @@
       };
     }
 
-    const STATS_D  = computeStats(DATABASE_D);
-    const STATS_DX = computeStats(DATABASE_DX);
+    const STATS_D  = computeStats(DATABASE_D);   // avgSalary≈78667
+    const STATS_DX = computeStats(DATABASE_DX);  // avgSalary=86250
 
     const STAT_DEFS = [
       { key:'avgSalary', label:'Mean salary',           icon:'💼',
         fmt: v => `$${Math.round(v).toLocaleString()}`,
-        sensitivity: 145000 / DATABASE_DX.length },
+        sensitivity: PERSON_X.salary / DATABASE_DX.length },   // 200000/16 = 12500
       { key:'avgSick',   label:'Mean sick days / yr',   icon:'🏥',
         fmt: v => v.toFixed(2),
         sensitivity: 30 / DATABASE_DX.length },
       { key:'engCount',  label:'Engineering headcount', icon:'👥',
         fmt: v => String(Math.round(v)),
         sensitivity: 1 },
-      { key:'maxSalary', label:'Highest salary',        icon:'📈',
-        fmt: v => `$${Math.round(v).toLocaleString()}`,
-        sensitivity: 145000 },
     ];
 
     // ─── DP Math ──────────────────────────────────────────────────────────────
     function laplaceSample(b) {
+      if (b === 0) return 0;
       const u = Math.random() - 0.5;
       return -b * Math.sign(u) * Math.log(1 - 2 * Math.abs(u));
-    }
-    function sampleNoisyStats(trueStats, epsilon) {
-      return Object.fromEntries(
-        STAT_DEFS.map(def => [def.key, trueStats[def.key] + laplaceSample(def.sensitivity / epsilon)])
-      );
     }
 
     // ─── ML Phase data & helpers ──────────────────────────────────────────────
@@ -135,12 +129,11 @@
       }])
     );
 
-    // 4 cards (removed the non-member decoys for space)
     const MI_CARDS = [
-      { id:'a1', text: 'Alice M. earns $95,000 per year',     baseScore: 0.91 },
-      { id:'a3', text: 'Eve P. works in Engineering',         baseScore: 0.89 },
-      { id:'a5', text: 'Grace H. takes 9 sick days per year', baseScore: 0.87 },
-      { id:'a6', text: 'Morgan X. earns $145,000 per year',   baseScore: 0.92, scary: true },
+      { id:'a1', text: 'Alice M. earns $95,000 per year',      baseScore: 0.91 },
+      { id:'a3', text: 'Eve P. works in Engineering',          baseScore: 0.89 },
+      { id:'a5', text: 'Grace H. takes 9 sick days per year',  baseScore: 0.87 },
+      { id:'a6', text: 'Morgan X. earns $200,000 per year',    baseScore: 0.92, scary: true },
     ];
 
     function membershipScore(baseScore, epsilon) {
@@ -182,14 +175,12 @@
     const ADJ_SALS  = [12000, 185000, 22000, 295000, 8500, 42000, 210000, 55000, 3200, 400000];
     const ADJ_SICK  = [0, 30, 25, 52, 45, 18, 38, 60];
 
-    function getCompletion(emp, epsilon, sliderVal) {
+    function getCompletion(emp, epsilon) {
       const n = UNIT_NOISE[emp.id];
-
       if (epsilon >= 4) {
         return { salary: `$${emp.salary.toLocaleString()}`, dept: emp.dept,
                  sick: `${emp.sick}`, quality: 'exact' };
       }
-
       if (epsilon >= 1.2) {
         const nSal  = Math.max(20000, Math.round(emp.salary + n.salary * 32000 / epsilon));
         const nSick = Math.max(0, Math.round(emp.sick + n.sick * 7 / epsilon));
@@ -199,48 +190,39 @@
                  dept: epsilon >= 2.5 ? emp.dept : depts[wrongIdx],
                  sick: `${nSick}`, quality: 'noisy' };
       }
-
       const step = Math.round(epsilon * 10);
       const base = emp.id * 997 + step * 137;
       const rD   = mulberry32(base + 1);
       const rS   = mulberry32(base + 2);
       const rK   = mulberry32(base + 3);
       const pick = (rng, arr) => arr[Math.floor(rng() * arr.length)];
-
       if (epsilon >= 0.9) {
         const nSal  = Math.max(10000, Math.round(emp.salary + (rS() - 0.5) * 60000));
         const nSick = Math.max(0, Math.round(emp.sick + (rK() - 0.5) * 8));
-        return { dept:   `${emp.dept} ${pick(rD, ADJ_QUAL)}`,
-                 salary: `$${nSal.toLocaleString()}`,
-                 sick:   `${nSick}`, quality: 'protected' };
-
+        return { dept: `${emp.dept} ${pick(rD, ADJ_QUAL)}`, salary: `$${nSal.toLocaleString()}`,
+                 sick: `${nSick}`, quality: 'protected' };
       } else if (epsilon >= 0.6) {
-        return { dept:   pick(rD,  ADJ_DEPTS),
-                 salary: `$${pick(rS, ADJ_SALS).toLocaleString()}`,
-                 sick:   `${pick(rK, ADJ_SICK)}`, quality: 'protected' };
-
+        return { dept: pick(rD, ADJ_DEPTS), salary: `$${pick(rS, ADJ_SALS).toLocaleString()}`,
+                 sick: `${pick(rK, ADJ_SICK)}`, quality: 'protected' };
       } else if (epsilon >= 0.3) {
-        const tok1 = TOKEN_POOL[Math.floor(rD()  * TOKEN_POOL.length)];
-        const tok2 = TOKEN_POOL[Math.floor(rS()  * TOKEN_POOL.length)];
-        const tok3 = TOKEN_POOL[Math.floor(rK()  * TOKEN_POOL.length)];
-        return { dept:   `${pick(rD, ADJ_DEPTS)} ${tok1}`,
+        const tok1 = TOKEN_POOL[Math.floor(rD() * TOKEN_POOL.length)];
+        const tok2 = TOKEN_POOL[Math.floor(rS() * TOKEN_POOL.length)];
+        const tok3 = TOKEN_POOL[Math.floor(rK() * TOKEN_POOL.length)];
+        return { dept: `${pick(rD, ADJ_DEPTS)} ${tok1}`,
                  salary: `${tok2} $${Math.round(rS() * 300000 + 5000).toLocaleString()}`,
-                 sick:   tok3, quality: 'protected' };
-
+                 sick: tok3, quality: 'protected' };
       } else {
-        return { dept:   gibWords(mulberry32(base + 10), 3),
-                 salary: gibWords(mulberry32(base + 11), 4),
-                 sick:   gibWords(mulberry32(base + 12), 2),
-                 quality: 'protected' };
+        return { dept: gibWords(mulberry32(base + 10), 3), salary: gibWords(mulberry32(base + 11), 4),
+                 sick: gibWords(mulberry32(base + 12), 2), quality: 'protected' };
       }
     }
 
     function CompletionChip({ text, quality }) {
       return (
         <span className={`inline-block px-1.5 py-0.5 rounded font-mono font-semibold mx-0.5 ${
-          quality === 'exact'     ? 'text-red-300   bg-red-950/70   border border-red-900/60' :
-          quality === 'noisy'     ? 'text-amber-300 bg-amber-950/70 border border-amber-900/60' :
-                                    'text-green-300 bg-green-950/70 border border-green-900/60'}`}>
+          quality === 'exact'  ? 'text-red-300   bg-red-950/70   border border-red-900/60' :
+          quality === 'noisy'  ? 'text-amber-300 bg-amber-950/70 border border-amber-900/60' :
+                                 'text-green-300 bg-green-950/70 border border-green-900/60'}`}>
           {text}
         </span>
       );
@@ -250,24 +232,33 @@
     const QUESTIONS = [
       {
         key: 'salary',
-        q: 'Mean salary rose from $78,667 → $82,813 when x joined.',
+        q: 'Mean salary rose from $78,667 → $86,250 when x joined.',
         prompt: "What is x's exact salary?",
-        options: ['Around $79k — close to the group average', 'Between $90k and $120k', 'Well above $130k'],
+        options: ['Below $79k — close to the group average', '$80k – $100k', 'Above $100k'],
         correct: 2,
-        math: `x's salary = 16 × $82,813 − 15 × $78,667 = $1,325,008 − $1,180,005 = $145,003`,
+        math: `x's salary = 16 × $86,250 − 15 × $78,667 = $1,380,000 − $1,180,005 = $199,995 ≈ $200,000`,
       },
     ];
 
     // ─── Step bar ─────────────────────────────────────────────────────────────
-    function StepBar({ current, onStep }) {
+    function StepBar({ current, onStep, showAdvanced, onToggleAdvanced }) {
       const { isDark, toggleDark } = useContext(ThemeCtx);
-      const steps = ['D vs D+x', 'Infer x', 'DP', 'ML model', 'Research'];
+      const allSteps = ['D vs D+x', 'Infer x', 'DP', 'ML model', 'Research'];
+      const steps = showAdvanced ? allSteps : allSteps.slice(0, 3);
+
       return (
         <div className="shrink-0 pb-2">
           <div className="flex items-center justify-between mb-2">
-            <div className="bg-white rounded-lg px-3 py-1">
-              <img src="769b98b74099646aa6bb597caefa24abfbecd74b.png"
-                alt="CISPA" className="h-5 w-auto" />
+            {/* Left: hide/show toggle + logo */}
+            <div className="flex items-center gap-2">
+              <button onClick={onToggleAdvanced}
+                className="text-[10px] uppercase tracking-wider text-gray-600 hover:text-gray-400 border border-gray-800 rounded px-2 py-1 transition-colors whitespace-nowrap">
+                {showAdvanced ? '▼ Full' : '▶ Present'}
+              </button>
+              <div className="bg-white rounded-lg px-3 py-1">
+                <img src="769b98b74099646aa6bb597caefa24abfbecd74b.png"
+                  alt="CISPA" className="h-5 w-auto" />
+              </div>
             </div>
             <div className="flex items-center gap-3">
               <span className="text-[10px] text-gray-700 uppercase tracking-wider">Differential Privacy</span>
@@ -311,8 +302,8 @@
               alt="CISPA – Helmholtz Center for Information Security"
               className="h-12 w-auto" />
           </div>
-          <h1 className="text-5xl sm:text-6xl font-bold max-w-2xl leading-tight">
-            What can aggregate statistics<br className="hidden sm:block" />reveal about you?
+          <h1 className="text-4xl font-bold max-w-3xl leading-tight">
+            What can aggregate statistics reveal about you?
           </h1>
           <p className="text-gray-400 max-w-md text-base">
             Knowing the mean salary before and after you join a database
@@ -333,14 +324,11 @@
       HR:          'text-amber-400',
     };
 
-    function PhaseCompare({ onContinue, goToStep }) {
+    function PhaseCompare({ onContinue, goToStep, showAdvanced, onToggleAdvanced }) {
       const [xAdded, setXAdded] = useState(false);
-
       return (
         <div className="h-screen overflow-hidden flex flex-col max-w-5xl mx-auto px-6 py-3">
-          <StepBar current={0} onStep={goToStep} />
-
-          {/* Header */}
+          <StepBar current={0} onStep={goToStep} showAdvanced={showAdvanced} onToggleAdvanced={onToggleAdvanced} />
           <div className="flex items-center justify-between mb-2 shrink-0">
             <div>
               <h2 className="text-2xl font-bold">
@@ -358,10 +346,7 @@
               </button>
             )}
           </div>
-
-          {/* Content grid — fills remaining height */}
           <div className="flex-1 grid grid-cols-1 lg:grid-cols-5 gap-4 min-h-0">
-            {/* Table */}
             <div className="lg:col-span-3 border border-gray-800 rounded-xl overflow-hidden flex flex-col min-h-0">
               <div className="flex-1 overflow-y-auto">
                 <table className="w-full text-sm">
@@ -394,8 +379,6 @@
                 </table>
               </div>
             </div>
-
-            {/* Stats */}
             <div className="lg:col-span-2 flex flex-col gap-2 min-h-0">
               {STAT_DEFS.map(def => {
                 const dVal    = STATS_D[def.key];
@@ -422,7 +405,6 @@
                   </div>
                 );
               })}
-
               {xAdded && (
                 <button onClick={onContinue}
                   className="w-full py-3 rounded-xl bg-cispa hover:bg-cispa-light text-sm font-medium transition-colors shrink-0">
@@ -436,7 +418,7 @@
     }
 
     // ─── Phase 2: Quiz ────────────────────────────────────────────────────────
-    function PhaseMCQA({ onContinue, goToStep }) {
+    function PhaseMCQA({ onContinue, goToStep, showAdvanced, onToggleAdvanced }) {
       const [guesses,  setGuesses]  = useState({});
       const [revealed, setRevealed] = useState(false);
       const allAnswered = QUESTIONS.every(q => guesses[q.key] !== undefined);
@@ -444,12 +426,11 @@
 
       return (
         <div className="h-screen overflow-hidden flex flex-col max-w-2xl mx-auto px-6 py-3">
-          <StepBar current={1} onStep={goToStep} />
+          <StepBar current={1} onStep={goToStep} showAdvanced={showAdvanced} onToggleAdvanced={onToggleAdvanced} />
           <h2 className="text-2xl font-bold mb-1 shrink-0">Infer x's profile</h2>
           <p className="text-sm text-gray-500 mb-4 shrink-0">
             The analyst sees only how the statistics shifted. What can they deduce?
           </p>
-
           <div className="flex-1 overflow-y-auto min-h-0 space-y-4">
             {QUESTIONS.map((q) => {
               const g = guesses[q.key];
@@ -493,7 +474,6 @@
               );
             })}
           </div>
-
           <div className="shrink-0 pt-3 space-y-3">
             {allAnswered && !revealed && (
               <button onClick={() => setRevealed(true)}
@@ -526,40 +506,143 @@
       );
     }
 
+    // ─── Salary distribution chart ───────────────────────────────────────────
+    // Shows the Laplace distribution of reported mean(D+x) vs exact mean(D).
+    // At high ε the two are clearly separated; at low ε the distribution widens
+    // and the two peaks overlap — making inference impossible.
+    function SalaryDistribution({ epsilon, noiseScale }) {
+      const W = 560, H = 90;
+      const muD  = STATS_D.avgSalary;   // 78 667 — exact, sharp spike
+      const muDX = STATS_DX.avgSalary;  // 86 250 — noisy
+
+      // Visible salary window: centre between the two means, ±3 noise scales (min ±30k)
+      const halfSpan = Math.max(30000, noiseScale * 3.5);
+      const xMin = Math.min(muD, muDX) - halfSpan;
+      const xMax = Math.max(muD, muDX) + halfSpan;
+      const toSvgX = v => ((v - xMin) / (xMax - xMin)) * W;
+
+      // Laplace PDF for D+x (noisy)
+      const laplacePdf = x => {
+        if (epsilon === Infinity || noiseScale === 0) return 0;
+        return Math.exp(-Math.abs(x - muDX) / noiseScale) / (2 * noiseScale);
+      };
+
+      // Normalise to SVG height (leave ~8px margin at top)
+      const peakPdf = epsilon === Infinity ? 1 : laplacePdf(muDX);
+      const normalize = v => peakPdf > 0 ? (v / peakPdf) * (H - 12) : 0;
+
+      // Build SVG path for Laplace curve (100 steps)
+      const steps = 120;
+      const points = Array.from({ length: steps + 1 }, (_, i) => {
+        const x = xMin + (i / steps) * (xMax - xMin);
+        const y = H - normalize(laplacePdf(x));
+        return `${toSvgX(x).toFixed(1)},${y.toFixed(1)}`;
+      });
+      const curvePath = `M ${points.join(' L ')}`;
+
+      // Fill path (close to bottom)
+      const fillPath = `M ${toSvgX(xMin)},${H} L ${points.join(' L ')} L ${toSvgX(xMax)},${H} Z`;
+
+      const xD  = toSvgX(muD).toFixed(1);
+      const xDX = toSvgX(muDX).toFixed(1);
+
+      const overlapping = epsilon !== Infinity && noiseScale > Math.abs(muDX - muD) * 0.5;
+
+      return (
+        <div className="border border-gray-800 rounded-xl p-4 mb-3 shrink-0">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs text-gray-600 uppercase tracking-wider">
+              Distribution of reported mean(D+x) vs exact mean(D)
+            </div>
+            <div className={`text-xs font-semibold px-2.5 py-1 rounded-full border transition-all duration-500 ${
+              overlapping || epsilon === Infinity && false
+                ? 'border-green-700 bg-green-950/40 text-green-300'
+                : 'border-red-800 bg-red-950/30 text-red-300'}`}>
+              {overlapping ? '✓ Distributions overlap — inference fails' : '❌ Clearly separated — salary recoverable'}
+            </div>
+          </div>
+          <svg width="100%" viewBox={`0 0 ${W} ${H}`} className="overflow-visible">
+            {/* Fill under Laplace curve */}
+            {epsilon !== Infinity && (
+              <path d={fillPath} fill="rgba(0,145,181,0.12)" />
+            )}
+            {/* Laplace curve for D+x */}
+            {epsilon !== Infinity && (
+              <path d={curvePath} fill="none" stroke="#0091B5" strokeWidth="1.5" />
+            )}
+            {/* D mean — exact vertical line (sharp) */}
+            <line x1={xD} y1="4" x2={xD} y2={H} stroke="#f59e0b" strokeWidth="2" strokeDasharray="4,3" />
+            {/* D+x mean — true value marker */}
+            <line x1={xDX} y1="4" x2={xDX} y2={H} stroke="#4DC8E0" strokeWidth="1.5" strokeDasharray="2,3" opacity="0.5" />
+            {/* At ε=∞ show D+x as sharp spike too */}
+            {epsilon === Infinity && (
+              <line x1={xDX} y1="4" x2={xDX} y2={H} stroke="#4DC8E0" strokeWidth="2" />
+            )}
+            {/* Labels */}
+            <text x={xD} y="3" textAnchor="middle" fontSize="8" fill="#f59e0b" dominantBaseline="hanging">mean(D)</text>
+            <text x={xDX} y="3" textAnchor="middle" fontSize="8" fill="#4DC8E0" dominantBaseline="hanging">mean(D+x)</text>
+          </svg>
+          <div className="flex justify-between text-[10px] text-gray-700 mt-1 font-mono">
+            <span>${Math.round(xMin / 1000)}k</span>
+            <span className="text-gray-600 italic">
+              {epsilon === Infinity
+                ? 'No noise — two perfectly separated spikes'
+                : overlapping
+                ? 'Noise smears D+x across the D mean — indistinguishable'
+                : 'Gap still visible — salary roughly recoverable'}
+            </span>
+            <span>${Math.round(xMax / 1000)}k</span>
+          </div>
+        </div>
+      );
+    }
+
     // ─── Phase 3: DP ─────────────────────────────────────────────────────────
-    function PhaseDP({ onContinue, onRestart, goToStep }) {
+    function PhaseDP({ onContinue, onRestart, goToStep, showAdvanced, onToggleAdvanced }) {
       const sliderToEps = v => v >= 100 ? Infinity : Math.pow(10, -1 + (v / 99) * 2);
       const [sliderVal, setSliderVal] = useState(85);
       const [seed, setSeed] = useState(0);
       const epsilon = sliderToEps(sliderVal);
 
-      const noisyD  = useMemo(() => sampleNoisyStats(STATS_D,  epsilon), [epsilon, seed]);
-      const noisyDX = useMemo(() => sampleNoisyStats(STATS_DX, epsilon), [epsilon, seed]);
+      const def = STAT_DEFS[0]; // avgSalary only
 
-      const def        = STAT_DEFS[0];
-      const scale      = def.sensitivity / epsilon;
-      const vD         = noisyD.avgSalary;
-      const vDX        = noisyDX.avgSalary;
-      const obsDelta   = vDX - vD;
-      const trueDelta  = STATS_DX.avgSalary - STATS_D.avgSalary;
-      const ref          = Math.max(scale * 1.1, trueDelta * 2);
-      const signalBarPct = Math.min(95, (trueDelta / ref) * 100);
-      const noiseBarPct  = Math.min(95, (scale    / ref) * 100);
+      // Only D+x gets Laplace noise; D is reported exactly (no DP applied to D)
+      const noisyDXMean = useMemo(() => {
+        if (epsilon === Infinity) return STATS_DX.avgSalary;
+        const noise = laplaceSample(def.sensitivity / epsilon);
+        return Math.max(0, STATS_DX.avgSalary + noise); // clipped: salary means can't be negative
+      }, [epsilon, seed]);
 
-      const protection =
-        epsilon === Infinity ? "No privacy at all — true values returned exactly" :
-        epsilon < 0.5 ? "Strong — x's salary is hidden in noise" :
-        epsilon < 2   ? "Moderate — signal may still be detectable" :
-        epsilon < 5   ? "Weak — salary change visible to analyst" :
-                        "Minimal — noise barely conceals the signal";
+      const exactDMean = STATS_D.avgSalary; // D reported without noise
+
+      // Analyst's inference: x's salary = n_DX * mean(D+x) − n_D * mean(D)
+      const inferredSalary = DATABASE_DX.length * noisyDXMean - DATABASE_D.length * exactDMean;
+      const salaryError    = Math.abs(inferredSalary - PERSON_X.salary);
+
+      const recoveryStatus =
+        salaryError <= 10000 ? 'fail' :
+        salaryError <= 50000 ? 'partial' :
+                               'protected';
+
+      const noiseScale = epsilon === Infinity ? 0 : def.sensitivity / epsilon;
+
+      const epsilonLabel =
+        epsilon === Infinity ? 'No privacy — true values returned exactly' :
+        epsilon < 0.5 ? "Strong — salary well hidden in noise" :
+        epsilon < 2   ? "Moderate — some signal remains" :
+        epsilon < 5   ? "Weak — salary approximately recoverable" :
+                        "Minimal — salary nearly exactly recoverable";
+
+      const inferredFmt = inferredSalary < 0
+        ? `−$${Math.abs(Math.round(inferredSalary)).toLocaleString()}`
+        : def.fmt(inferredSalary);
 
       return (
         <div className="h-screen overflow-hidden flex flex-col max-w-2xl mx-auto px-6 py-3">
-          <StepBar current={2} onStep={goToStep} />
+          <StepBar current={2} onStep={goToStep} showAdvanced={showAdvanced} onToggleAdvanced={onToggleAdvanced} />
           <h2 className="text-2xl font-bold mb-0.5 shrink-0">Differential privacy</h2>
           <p className="text-sm text-gray-500 mb-3 shrink-0">
-            Add Laplace noise to every query answer. At small ε the reported salary averages become
-            indistinguishable — x's exact salary can no longer be recovered.
+            We add Laplace noise only to the D+x query. Can the analyst still infer x's salary of <span className="font-mono text-amber-300">$200,000</span>?
           </p>
 
           {/* Slider */}
@@ -575,7 +658,7 @@
               <span className="text-3xl font-mono font-bold text-cispa-light">
                 ε = {epsilon === Infinity ? '∞' : epsilon.toFixed(2)}
               </span>
-              <span className="text-sm text-gray-500 flex-1 italic">{protection}</span>
+              <span className="text-sm text-gray-500 flex-1 italic">{epsilonLabel}</span>
               <button onClick={() => setSeed(s => s+1)}
                 className="text-xs text-gray-600 hover:text-gray-400 border border-gray-800 rounded px-2 py-1 transition-colors">
                 ↺ resample
@@ -583,104 +666,88 @@
             </div>
           </div>
 
-          {/* Two salary cards */}
+          {/* Two salary cards: D exact | D+x noisy */}
           <div className="grid grid-cols-2 gap-3 mb-3 shrink-0">
-            {[
-              { label: 'D — 15 employees', noisy: vD, true_: STATS_D.avgSalary },
-              { label: 'D+x — 16 employees', noisy: vDX, true_: STATS_DX.avgSalary },
-            ].map(({ label, noisy, true_ }) => (
-              <div key={label} className="border border-gray-800 rounded-xl p-4">
-                <div className="text-xs text-gray-600 uppercase tracking-wider mb-1">{label}</div>
-                <div className="font-mono text-3xl font-bold text-gray-100">{def.fmt(noisy)}</div>
-                <div className="text-xs text-gray-700 mt-1 font-mono">true: {def.fmt(true_)}</div>
+            <div className="border border-gray-800 rounded-xl p-4">
+              <div className="text-xs text-gray-600 uppercase tracking-wider mb-1">D — 15 employees</div>
+              <div className="font-mono text-3xl font-bold text-gray-100">{def.fmt(exactDMean)}</div>
+              <div className="text-xs text-gray-600 mt-1.5 font-mono">Exact — no noise added</div>
+            </div>
+            <div className="border border-gray-800 rounded-xl p-4">
+              <div className="text-xs text-gray-600 uppercase tracking-wider mb-1">D+x — 16 employees</div>
+              <div className="font-mono text-3xl font-bold text-gray-100">{def.fmt(noisyDXMean)}</div>
+              <div className="text-xs text-gray-700 mt-1.5 font-mono">
+                true: {def.fmt(STATS_DX.avgSalary)}
+                {' · noise: '}
+                {epsilon === Infinity ? '±$0' : `±${def.fmt(noiseScale)}`}
               </div>
-            ))}
+            </div>
           </div>
 
-          {/* Signal vs noise panel */}
-          <div className="border border-gray-800 rounded-xl p-4 mb-3 flex-1 min-h-0 flex flex-col justify-between">
-            <div className="flex items-start justify-between">
+          {/* Inferred salary + classification */}
+          <div className={`border rounded-xl p-4 mb-3 shrink-0 transition-all duration-500 ${
+            recoveryStatus === 'fail'     ? 'border-red-800/60 bg-red-950/15' :
+            recoveryStatus === 'partial'  ? 'border-amber-800/60 bg-amber-950/15' :
+                                            'border-green-800/60 bg-green-950/15'}`}>
+            <div className="text-xs text-gray-600 uppercase tracking-wider mb-2">
+              Analyst computes: 16 × mean(D+x) − 15 × mean(D)
+            </div>
+            <div className="flex items-center justify-between gap-4">
               <div>
-                <div className="text-xs text-gray-600 uppercase tracking-wider mb-1">Reported salary change</div>
-                <div className="font-mono text-4xl font-bold text-gray-100">
-                  {obsDelta >= 0 ? '+' : '−'}{def.fmt(Math.abs(obsDelta))}
+                <div className="font-mono text-3xl font-bold text-gray-100">{inferredFmt}</div>
+                <div className="text-xs text-gray-500 mt-1 font-mono">
+                  true: $200,000 · error: {def.fmt(salaryError)}
                 </div>
-                <div className="text-xs text-gray-600 mt-1 font-mono">(reported D+x) − (reported D)</div>
               </div>
-              <div className="text-right">
-                <div className="text-xs text-gray-600 uppercase tracking-wider mb-1">True signal</div>
-                <div className="font-mono text-2xl text-amber-400">+{def.fmt(trueDelta)}</div>
-                <div className="text-xs text-gray-700 mt-1">x's salary contribution</div>
+              <div className={`shrink-0 text-sm font-semibold px-4 py-2.5 rounded-lg border transition-all duration-500 ${
+                recoveryStatus === 'fail'    ? 'border-red-700    bg-red-950/50    text-red-300' :
+                recoveryStatus === 'partial' ? 'border-amber-700  bg-amber-950/50  text-amber-300' :
+                                               'border-green-700  bg-green-950/50  text-green-300'}`}>
+                {recoveryStatus === 'fail'    ? '❌ Salary recovered' :
+                 recoveryStatus === 'partial' ? '⚠️ Rough estimate' :
+                                                '✓ Protected'}
               </div>
             </div>
-            <div className="space-y-3 mt-4">
-              <div>
-                <div className="flex justify-between text-sm text-gray-500 mb-1">
-                  <span>True signal</span>
-                  <span className="font-mono text-amber-400">+{def.fmt(trueDelta)}</span>
-                </div>
-                <div className="h-4 bg-gray-800 rounded-full overflow-hidden">
-                  <div className="h-full bg-amber-500/70 rounded-full transition-all duration-500"
-                    style={{ width: `${signalBarPct}%` }} />
-                </div>
-              </div>
-              <div>
-                <div className="flex justify-between text-sm text-gray-500 mb-1">
-                  <span>Noise scale (Laplace Δf / ε)</span>
-                  <span className="font-mono text-gray-400">
-                    {epsilon === Infinity ? '±$0 — no noise' : `±${def.fmt(scale)}`}
-                  </span>
-                </div>
-                <div className="h-4 bg-gray-800 rounded-full overflow-hidden">
-                  <div className="h-full bg-cispa/60 rounded-full transition-all duration-500"
-                    style={{ width: `${noiseBarPct}%` }} />
-                </div>
-              </div>
+            <div className={`text-xs mt-2 ${
+              recoveryStatus === 'fail'    ? 'text-red-400/70' :
+              recoveryStatus === 'partial' ? 'text-amber-400/70' :
+                                             'text-green-400/70'}`}>
+              {recoveryStatus === 'fail'
+                ? 'Error ≤ $10,000 — the analyst can recover x\'s exact salary.'
+                : recoveryStatus === 'partial'
+                ? 'Error $10k – $50k — rough salary range still visible.'
+                : 'Error > $50,000 — noise drowns out x\'s true salary.'}
             </div>
-            <p className="text-xs text-gray-600 mt-2 italic">
-              Noise bar &gt; signal bar → salary change indistinguishable from random fluctuation.
-            </p>
           </div>
 
-          {/* Formal guarantee */}
-          <div className="border border-cispa-dim/80 bg-cispa-dim/30 rounded-xl p-3 mb-3 shrink-0">
-            <div className="text-[10px] text-cispa uppercase tracking-wider mb-1">Formal ε-DP guarantee</div>
-            <div className="font-mono text-sm text-cispa-light">
-              P[M(D) = O] ≤ e<sup>ε</sup> · P[M(D+x) = O] &nbsp;&nbsp; ∀ outputs O
-            </div>
-            <p className="text-xs text-gray-600 mt-1">
-              {epsilon === Infinity
-                ? 'At ε = ∞, no noise is added. D and D+x produce different outputs — x is fully exposed.'
-                : `At ε = ${epsilon.toFixed(2)}, outputs differ by at most factor ${Math.exp(epsilon).toFixed(2)}.${
-                    Math.exp(epsilon) < 1.5 ? ' Practically indistinguishable.' :
-                    Math.exp(epsilon) < 5   ? ' Some distinguishability remains.' :
-                                              ' Easily distinguished — x is exposed.'}`}
-            </p>
-          </div>
+          {/* Distribution visualization */}
+          <SalaryDistribution epsilon={epsilon} noiseScale={noiseScale} />
 
           <div className="shrink-0 flex items-center gap-4">
             <button onClick={onRestart}
               className="text-sm text-gray-700 hover:text-gray-500 transition-colors">
               ← Start over
             </button>
-            <button onClick={onContinue}
-              className="ml-auto px-5 py-2.5 rounded-xl bg-cispa hover:bg-cispa-light text-sm font-medium transition-colors">
-              See it in a trained ML model →
-            </button>
+            {showAdvanced && (
+              <button onClick={onContinue}
+                className="ml-auto px-5 py-2.5 rounded-xl bg-cispa hover:bg-cispa-light text-sm font-medium transition-colors">
+                See it in a trained ML model →
+              </button>
+            )}
           </div>
         </div>
       );
     }
 
     // ─── Phase 4: ML model ───────────────────────────────────────────────────
-    function PhaseML({ onContinue, onRestart, goToStep }) {
+    function PhaseML({ onContinue, onRestart, goToStep, showAdvanced, onToggleAdvanced }) {
       const sliderToEps = v => v >= 100 ? Infinity : Math.pow(10, -1 + (v / 99) * 2);
       const [sliderVal, setSliderVal] = useState(100);
       const epsilon = sliderToEps(sliderVal);
 
       const [selectedId, setSelectedId] = useState(DATABASE_DX[0].id);
       const emp = DATABASE_DX.find(r => r.id === selectedId);
-      const completion = getCompletion(emp, epsilon, sliderVal);
+      const completion = getCompletion(emp, epsilon);
 
       const protection =
         epsilon === Infinity ? 'No DP — model fully memorizes training data' :
@@ -691,7 +758,7 @@
 
       return (
         <div className="h-screen overflow-hidden flex flex-col max-w-5xl mx-auto px-6 py-3">
-          <StepBar current={3} onStep={goToStep} />
+          <StepBar current={3} onStep={goToStep} showAdvanced={showAdvanced} onToggleAdvanced={onToggleAdvanced} />
           <h2 className="text-2xl font-bold mb-0.5 shrink-0">ML model trained on the same data</h2>
           <p className="text-sm text-gray-500 mb-3 shrink-0">
             Without DP, a model trained on D+x leaks two ways: membership inference (did this fact appear in training?)
@@ -715,9 +782,7 @@
             </div>
           </div>
 
-          {/* Two panels */}
           <div className="flex-1 grid grid-cols-2 gap-4 min-h-0">
-
             {/* Left: Membership inference */}
             <div className="border border-gray-800 rounded-xl overflow-hidden flex flex-col min-h-0">
               <div className="bg-gray-900 px-4 py-2.5 border-b border-gray-800 shrink-0">
@@ -774,7 +839,6 @@
                 <span className="text-xs text-gray-600 ml-2">— can the model complete this text?</span>
               </div>
               <div className="flex-1 p-4 flex flex-col gap-3 overflow-y-auto">
-                {/* Employee picker */}
                 <div className="shrink-0">
                   <label className="text-xs text-gray-600 uppercase tracking-wider block mb-1.5">
                     Select employee
@@ -788,17 +852,15 @@
                     ))}
                   </select>
                 </div>
-
-                {/* Text completion */}
-                <div className="rounded-lg border border-gray-800 overflow-hidden font-mono text-sm flex flex-col" style={{minHeight:'160px'}}>
-                  <div className="bg-gray-900/80 px-4 py-3 border-b border-gray-800 shrink-0">
+                <div className="rounded-lg border border-gray-800 overflow-hidden font-mono text-sm" style={{minHeight:'160px'}}>
+                  <div className="bg-gray-900/80 px-4 py-3 border-b border-gray-800">
                     <div className="text-[9px] text-gray-600 uppercase tracking-wider mb-1">Prompt</div>
                     <span className="text-gray-500">Complete the HR record for {emp.name}:</span>
                   </div>
                   <div className={`px-4 py-4 transition-colors duration-500 ${
-                    completion.quality === 'exact'     ? 'bg-red-950/15' :
-                    completion.quality === 'noisy'     ? 'bg-amber-950/15' :
-                                                         'bg-green-950/15'}`}>
+                    completion.quality === 'exact'  ? 'bg-red-950/15' :
+                    completion.quality === 'noisy'  ? 'bg-amber-950/15' :
+                                                      'bg-green-950/15'}`}>
                     <div className="text-[9px] text-gray-600 uppercase tracking-wider mb-2">Model output</div>
                     <p className="text-gray-400 leading-relaxed text-base">
                       <span>"They work in </span>
@@ -811,8 +873,6 @@
                     </p>
                   </div>
                 </div>
-
-                {/* Quality label */}
                 <div className={`shrink-0 rounded-lg px-4 py-3 text-sm border text-center transition-colors duration-500 ${
                   completion.quality === 'exact'
                     ? 'border-red-800/50   bg-red-950/20   text-red-300'
@@ -825,10 +885,9 @@
                     ? 'Coherent but wrong — plausible text, incorrect values'
                     : 'Protected — DP noise makes output incoherent gibberish'}
                 </div>
-
                 {emp.id === 16 && completion.quality !== 'protected' && (
                   <div className="shrink-0 border border-amber-800/50 bg-amber-950/20 rounded-lg p-3 text-sm text-amber-300">
-                    <strong>Morgan X.</strong> — x's record. At high ε the model reproduces their exact salary. Slide left to protect it.
+                    <strong>Morgan X.</strong> — x's record. At high ε the model reproduces their $200,000 salary exactly. Slide left to protect it.
                   </div>
                 )}
               </div>
@@ -850,17 +909,15 @@
     }
 
     // ─── Phase 5: Research ───────────────────────────────────────────────────
-    function PhaseResearch({ onRestart, goToStep }) {
+    function PhaseResearch({ onRestart, goToStep, showAdvanced, onToggleAdvanced }) {
       return (
         <div className="h-screen overflow-hidden flex flex-col max-w-4xl mx-auto px-6 py-3">
-          <StepBar current={4} onStep={goToStep} />
+          <StepBar current={4} onStep={goToStep} showAdvanced={showAdvanced} onToggleAdvanced={onToggleAdvanced} />
           <h2 className="text-2xl font-bold mb-0.5 shrink-0">From HR databases to foundation models</h2>
           <p className="text-sm text-gray-500 mb-3 shrink-0">
             The same privacy risk — at the scale of the entire internet.
           </p>
-
           <div className="flex-1 grid grid-cols-2 gap-3 min-h-0">
-
             <div className="border border-gray-800 rounded-xl p-5 flex items-start gap-4">
               <span className="text-3xl shrink-0">🌐</span>
               <div>
@@ -872,7 +929,6 @@
                 </p>
               </div>
             </div>
-
             <div className="border border-gray-800 rounded-xl p-5 flex items-start gap-4">
               <span className="text-3xl shrink-0">🔓</span>
               <div>
@@ -884,7 +940,6 @@
                 </p>
               </div>
             </div>
-
             <div className="border border-gray-800 rounded-xl p-5 flex items-start gap-4">
               <span className="text-3xl shrink-0">⚖️</span>
               <div>
@@ -896,7 +951,6 @@
                 </p>
               </div>
             </div>
-
             <div className="border border-cispa-dim/80 bg-cispa-dim/30 rounded-xl p-5 flex items-start gap-4">
               <span className="text-3xl shrink-0">🔬</span>
               <div>
@@ -915,9 +969,7 @@
                 </div>
               </div>
             </div>
-
           </div>
-
           <div className="shrink-0 pt-3">
             <button onClick={onRestart}
               className="text-sm text-gray-700 hover:text-gray-500 transition-colors">
@@ -932,22 +984,34 @@
     function App() {
       const [phase, setPhase] = useState('landing');
       const [isDark, setIsDark] = useState(true);
+      const [showAdvanced, setShowAdvanced] = useState(true);
       const toggleDark = () => setIsDark(d => !d);
+      const onToggleAdvanced = () => setShowAdvanced(v => {
+        // If hiding advanced tabs while on an advanced phase, go back to DP
+        if (v && (phase === 'ml' || phase === 'research')) setPhase('dp');
+        return !v;
+      });
 
       useEffect(() => {
         document.documentElement.classList.toggle('light', !isDark);
       }, [isDark]);
 
       const PHASES = ['compare', 'mcqa', 'dp', 'ml', 'research'];
-      const goToStep = i => setPhase(PHASES[i]);
+      const goToStep = i => {
+        // Prevent navigating to advanced phases when hidden
+        if (!showAdvanced && i >= 3) return;
+        setPhase(PHASES[i]);
+      };
+
+      const shared = { goToStep, showAdvanced, onToggleAdvanced };
 
       let content;
-      if      (phase==='landing')  content = <Landing         onStart={()    => setPhase('compare')} />;
-      else if (phase==='compare')  content = <PhaseCompare    onContinue={() => setPhase('mcqa')}     goToStep={goToStep} />;
-      else if (phase==='mcqa')     content = <PhaseMCQA       onContinue={() => setPhase('dp')}       goToStep={goToStep} />;
-      else if (phase==='dp')       content = <PhaseDP         onContinue={() => setPhase('ml')} onRestart={() => setPhase('landing')} goToStep={goToStep} />;
-      else if (phase==='ml')       content = <PhaseML         onContinue={() => setPhase('research')} onRestart={() => setPhase('landing')} goToStep={goToStep} />;
-      else if (phase==='research') content = <PhaseResearch   onRestart={() => setPhase('landing')}   goToStep={goToStep} />;
+      if      (phase==='landing')  content = <Landing         onStart={() => setPhase('compare')} />;
+      else if (phase==='compare')  content = <PhaseCompare    onContinue={() => setPhase('mcqa')}     {...shared} />;
+      else if (phase==='mcqa')     content = <PhaseMCQA       onContinue={() => setPhase('dp')}       {...shared} />;
+      else if (phase==='dp')       content = <PhaseDP         onContinue={() => setPhase('ml')} onRestart={() => setPhase('landing')} {...shared} />;
+      else if (phase==='ml')       content = <PhaseML         onContinue={() => setPhase('research')} onRestart={() => setPhase('landing')} {...shared} />;
+      else if (phase==='research') content = <PhaseResearch   onRestart={() => setPhase('landing')}   {...shared} />;
 
       return (
         <ThemeCtx.Provider value={{ isDark, toggleDark }}>
