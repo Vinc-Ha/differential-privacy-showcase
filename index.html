@@ -431,31 +431,31 @@
           <p className="text-sm text-gray-500 mb-4 shrink-0">
             The analyst sees only how the statistics shifted. What can they deduce?
           </p>
-          <div className="flex-1 min-h-0 flex flex-col gap-4">
+          <div className="flex-1 overflow-y-auto min-h-0">
             {QUESTIONS.map((q) => {
               const g = guesses[q.key];
               return (
-                <div key={q.key} className="border border-gray-800 rounded-xl overflow-hidden flex-1 flex flex-col">
-                  <div className="bg-gray-900 px-4 py-3 border-b border-gray-800">
+                <div key={q.key} className="border border-gray-800 rounded-xl overflow-hidden">
+                  <div className="bg-gray-900 px-5 py-4 border-b border-gray-800">
                     <span className="text-xs text-gray-600 uppercase tracking-wider mr-2">Observed</span>
-                    <span className="text-sm font-mono text-amber-300">{q.q}</span>
+                    <span className="text-base font-mono text-amber-300">{q.q}</span>
                   </div>
-                  <div className="px-4 pt-4 pb-3 flex-1 flex flex-col">
-                    <p className="text-base font-medium text-gray-200 mb-4 shrink-0">{q.prompt}</p>
-                    <div className="flex-1 flex flex-col gap-3 justify-evenly">
+                  <div className="px-5 pt-5 pb-4">
+                    <p className="text-xl font-semibold text-gray-200 mb-5">{q.prompt}</p>
+                    <div className="space-y-3">
                       {q.options.map((opt, oi) => {
                         const chosen  = g === oi;
                         const correct = revealed && oi === q.correct;
                         const wrong   = revealed && chosen && oi !== q.correct;
                         return (
                           <button key={oi} onClick={() => !revealed && setGuesses(gs => ({ ...gs, [q.key]: oi }))}
-                            className={`w-full text-left px-4 py-4 rounded-lg border text-sm transition-colors ${
+                            className={`w-full text-left px-5 py-4 rounded-lg border text-base transition-colors ${
                               correct ? 'border-green-700 bg-green-950/40 text-green-300' :
                               wrong   ? 'border-red-800  bg-red-950/30  text-red-300' :
                               chosen  ? 'border-cispa bg-cispa-dim/50 text-cispa-light' :
                                         'border-gray-800 text-gray-400 hover:border-gray-600'
                             } ${revealed ? 'cursor-default' : 'cursor-pointer'}`}>
-                            <span className="text-xs text-gray-600 font-mono mr-2">{String.fromCharCode(97+oi)})</span>
+                            <span className="text-sm text-gray-600 font-mono mr-2">{String.fromCharCode(97+oi)})</span>
                             {opt}
                             {correct && ' ✓'}{wrong && ' ✗'}
                           </button>
@@ -574,7 +574,7 @@
       const blueLabel = mode === 'mean' ? 'mean(D+x)'  : 'inferred';
 
       return (
-        <div className="border border-gray-800 rounded-xl p-4 flex-1 min-h-0 overflow-hidden flex flex-col">
+        <div className="border border-gray-800 rounded-xl p-4 mb-3 shrink-0">
           <div className="flex items-center justify-between mb-2">
             <div className="text-xs text-gray-600 uppercase tracking-wider">
               {mode === 'mean' ? 'Reported mean(D+x) distribution' : 'Inferred salary distribution'}
@@ -593,7 +593,7 @@
             </div>
           </div>
 
-          <svg width="100%" viewBox={`0 0 ${W} ${H}`} className="overflow-visible flex-1 min-h-0">
+          <svg width="100%" viewBox={`0 0 ${W} ${H}`} className="overflow-visible">
             {/* Fill */}
             {epsilon !== Infinity && <path d={fillPath} fill="rgba(0,145,181,0.12)" />}
             {/* Curve */}
@@ -677,8 +677,8 @@
           </p>
 
           {/* Slider */}
-          <div className="border border-gray-800 rounded-xl p-4 mb-3 space-y-2 shrink-0">
-            <div className="flex justify-between text-[10px] text-gray-600 uppercase tracking-wider">
+          <div className="border border-gray-800 rounded-xl p-5 mb-3 space-y-2 shrink-0">
+            <div className="flex justify-between text-xs text-gray-600 uppercase tracking-wider">
               <span>No privacy (p = 0)</span>
               <span>High privacy (p = 1)</span>
             </div>
@@ -686,10 +686,10 @@
               onChange={e => setSliderVal(Number(e.target.value))}
               className="w-full accent-cispa cursor-pointer" />
             <div className="flex items-center gap-3">
-              <span className="text-3xl font-mono font-bold text-cispa-light">
+              <span className="text-5xl font-mono font-bold text-cispa-light">
                 p = {p.toFixed(2)}
               </span>
-              <span className="text-sm text-gray-500 flex-1 italic">{privacyLabel}</span>
+              <span className="text-base text-gray-500 flex-1 italic">{privacyLabel}</span>
               <button onClick={() => setSeed(s => s+1)}
                 className="text-xs text-gray-600 hover:text-gray-400 border border-gray-800 rounded px-2 py-1 transition-colors">
                 ↺ resample
@@ -699,15 +699,15 @@
 
           {/* Two salary cards: D exact | D+x noisy */}
           <div className="grid grid-cols-2 gap-3 mb-3 shrink-0">
-            <div className="border border-gray-800 rounded-xl p-4 flex flex-col justify-center">
-              <div className="text-sm font-bold text-gray-300 uppercase tracking-wider mb-1">D - 15 employees</div>
-              <div className="font-mono text-3xl font-bold text-gray-100">{def.fmt(exactDMean)}</div>
-              <div className="text-xs text-gray-600 mt-1.5 font-mono">Exact - no noise added</div>
+            <div className="border border-gray-800 rounded-xl p-5 flex flex-col justify-center">
+              <div className="text-base font-bold text-gray-300 uppercase tracking-wider mb-1">D - 15 employees</div>
+              <div className="font-mono text-4xl font-bold text-gray-100">{def.fmt(exactDMean)}</div>
+              <div className="text-sm text-gray-600 mt-1.5 font-mono">Exact - no noise added</div>
             </div>
-            <div className="border border-gray-800 rounded-xl p-4 flex flex-col justify-center">
-              <div className="text-sm font-bold text-gray-300 uppercase tracking-wider mb-1">D+x - 16 employees</div>
-              <div className="font-mono text-3xl font-bold text-gray-100">{def.fmt(noisyDXMean)}</div>
-              <div className="text-xs text-gray-700 mt-1.5 font-mono">
+            <div className="border border-gray-800 rounded-xl p-5 flex flex-col justify-center">
+              <div className="text-base font-bold text-gray-300 uppercase tracking-wider mb-1">D+x - 16 employees</div>
+              <div className="font-mono text-4xl font-bold text-gray-100">{def.fmt(noisyDXMean)}</div>
+              <div className="text-sm text-gray-700 mt-1.5 font-mono">
                 true: {def.fmt(STATS_DX.avgSalary)}
                 {' · noise: '}
                 {epsilon === Infinity ? '±$0' : `±${def.fmt(noiseScale)}`}
@@ -716,21 +716,21 @@
           </div>
 
           {/* Inferred salary + classification */}
-          <div className={`border rounded-xl p-4 mb-3 shrink-0 transition-all duration-500 ${
+          <div className={`border rounded-xl p-5 mb-3 shrink-0 transition-all duration-500 ${
             recoveryStatus === 'fail'     ? 'border-red-800/60 bg-red-950/15' :
             recoveryStatus === 'partial'  ? 'border-amber-800/60 bg-amber-950/15' :
                                             'border-green-800/60 bg-green-950/15'}`}>
-            <div className="text-xs text-gray-600 uppercase tracking-wider mb-2">
+            <div className="text-sm text-gray-600 uppercase tracking-wider mb-2">
               Analyst computes: 16 × mean(D+x) − 15 × mean(D)
             </div>
             <div className="flex items-center justify-between gap-4">
               <div>
-                <div className="font-mono text-3xl font-bold text-gray-100">{inferredFmt}</div>
-                <div className="text-xs text-gray-500 mt-1 font-mono">
+                <div className="font-mono text-4xl font-bold text-gray-100">{inferredFmt}</div>
+                <div className="text-sm text-gray-500 mt-1 font-mono">
                   true: $200,000 · error: {def.fmt(salaryError)}
                 </div>
               </div>
-              <div className={`shrink-0 text-sm font-semibold px-4 py-2.5 rounded-lg border transition-all duration-500 ${
+              <div className={`shrink-0 text-base font-semibold px-5 py-3 rounded-lg border transition-all duration-500 ${
                 recoveryStatus === 'fail'    ? 'border-red-700    bg-red-950/50    text-red-300' :
                 recoveryStatus === 'partial' ? 'border-amber-700  bg-amber-950/50  text-amber-300' :
                                                'border-green-700  bg-green-950/50  text-green-300'}`}>
@@ -739,7 +739,7 @@
                                                 '✓ Protected'}
               </div>
             </div>
-            <div className={`text-xs mt-2 ${
+            <div className={`text-sm mt-2 ${
               recoveryStatus === 'fail'    ? 'text-red-400/70' :
               recoveryStatus === 'partial' ? 'text-amber-400/70' :
                                              'text-green-400/70'}`}>
