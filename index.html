@@ -736,6 +736,22 @@
       const p       = sliderVal / 100;
       const epsilon = p === 0 ? Infinity : 2.5 / p;
 
+      const PRESETS = [0, 50, 100];
+      useEffect(() => {
+        function onKey(e) {
+          if (e.key === 'ArrowRight') {
+            const next = PRESETS.find(v => v > sliderVal);
+            if (next !== undefined) setSliderVal(next);
+            else onContinue();
+          } else if (e.key === 'ArrowLeft') {
+            const prev = [...PRESETS].reverse().find(v => v < sliderVal);
+            if (prev !== undefined) setSliderVal(prev);
+          }
+        }
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [sliderVal, onContinue]);
+
       const def = STAT_DEFS[0]; // avgSalary only
 
       // Only D+x gets Laplace noise; D is reported exactly
@@ -790,10 +806,21 @@
                 p = {p.toFixed(2)}
               </span>
               <span className="text-base text-gray-500 flex-1 italic">{privacyLabel}</span>
-              <button onClick={() => setSeed(s => s+1)}
-                className="text-xs text-gray-600 hover:text-gray-400 border border-gray-800 rounded px-2 py-1 transition-colors">
-                ↺ resample
-              </button>
+              <div className="flex items-center gap-1.5">
+                {[0, 50, 100].map(v => (
+                  <button key={v} onClick={() => setSliderVal(v)}
+                    className={`text-xs font-mono border rounded px-2 py-1 transition-colors ${
+                      sliderVal === v
+                        ? 'border-cispa text-cispa-light bg-cispa-dim/30'
+                        : 'border-gray-800 text-gray-600 hover:text-gray-400 hover:border-gray-600'}`}>
+                    {v === 0 ? '0' : v === 50 ? '0.5' : '1'}
+                  </button>
+                ))}
+                <button onClick={() => setSeed(s => s+1)}
+                  className="text-xs text-gray-600 hover:text-gray-400 border border-gray-800 rounded px-2 py-1 transition-colors ml-1">
+                  ↺
+                </button>
+              </div>
             </div>
           </div>
 
