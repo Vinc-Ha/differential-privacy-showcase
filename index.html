@@ -104,7 +104,7 @@
 
     const STAT_DEFS = [
       { key:'avgSalary', label:'Mean salary',           icon:'💼',
-        fmt: v => `$${Math.round(v).toLocaleString()}`,
+        fmt: v => `€${Math.round(v).toLocaleString()}`,
         sensitivity: PERSON_X.salary / DATABASE_DX.length },   // 200000/16 = 12500
       { key:'avgSick',   label:'Mean sick days / yr',   icon:'🏥',
         fmt: v => v.toFixed(2),
@@ -133,7 +133,7 @@
       { id:'a1', text: 'Alice M. earns $95,000 per year',      baseScore: 0.91 },
       { id:'a3', text: 'Eve P. works in Engineering',          baseScore: 0.89 },
       { id:'a5', text: 'Grace H. takes 9 sick days per year',  baseScore: 0.87 },
-      { id:'a6', text: 'Morgan X. earns $200,000 per year',    baseScore: 0.92, scary: true },
+      { id:'a6', text: 'Morgan X. earns €200,000 per year',    baseScore: 0.92, scary: true },
     ];
 
     function membershipScore(baseScore, epsilon) {
@@ -178,7 +178,7 @@
     function getCompletion(emp, epsilon) {
       const n = UNIT_NOISE[emp.id];
       if (epsilon >= 4) {
-        return { salary: `$${emp.salary.toLocaleString()}`, dept: emp.dept,
+        return { salary: `€${emp.salary.toLocaleString()}`, dept: emp.dept,
                  sick: `${emp.sick}`, quality: 'exact' };
       }
       if (epsilon >= 1.2) {
@@ -186,7 +186,7 @@
         const nSick = Math.max(0, Math.round(emp.sick + n.sick * 7 / epsilon));
         const depts = ['Engineering', 'Sales', 'HR'];
         const wrongIdx = (depts.indexOf(emp.dept) + (n.salary > 0 ? 1 : 2)) % 3;
-        return { salary: `$${nSal.toLocaleString()}`,
+        return { salary: `€${nSal.toLocaleString()}`,
                  dept: epsilon >= 2.5 ? emp.dept : depts[wrongIdx],
                  sick: `${nSick}`, quality: 'noisy' };
       }
@@ -199,17 +199,17 @@
       if (epsilon >= 0.9) {
         const nSal  = Math.max(10000, Math.round(emp.salary + (rS() - 0.5) * 60000));
         const nSick = Math.max(0, Math.round(emp.sick + (rK() - 0.5) * 8));
-        return { dept: `${emp.dept} ${pick(rD, ADJ_QUAL)}`, salary: `$${nSal.toLocaleString()}`,
+        return { dept: `${emp.dept} ${pick(rD, ADJ_QUAL)}`, salary: `€${nSal.toLocaleString()}`,
                  sick: `${nSick}`, quality: 'protected' };
       } else if (epsilon >= 0.6) {
-        return { dept: pick(rD, ADJ_DEPTS), salary: `$${pick(rS, ADJ_SALS).toLocaleString()}`,
+        return { dept: pick(rD, ADJ_DEPTS), salary: `€${pick(rS, ADJ_SALS).toLocaleString()}`,
                  sick: `${pick(rK, ADJ_SICK)}`, quality: 'protected' };
       } else if (epsilon >= 0.3) {
         const tok1 = TOKEN_POOL[Math.floor(rD() * TOKEN_POOL.length)];
         const tok2 = TOKEN_POOL[Math.floor(rS() * TOKEN_POOL.length)];
         const tok3 = TOKEN_POOL[Math.floor(rK() * TOKEN_POOL.length)];
         return { dept: `${pick(rD, ADJ_DEPTS)} ${tok1}`,
-                 salary: `${tok2} $${Math.round(rS() * 300000 + 5000).toLocaleString()}`,
+                 salary: `${tok2} €${Math.round(rS() * 300000 + 5000).toLocaleString()}`,
                  sick: tok3, quality: 'protected' };
       } else {
         return { dept: gibWords(mulberry32(base + 10), 3), salary: gibWords(mulberry32(base + 11), 4),
@@ -232,11 +232,11 @@
     const QUESTIONS = [
       {
         key: 'salary',
-        q: 'Mean salary rose from $78,667 → $86,250 when x joined.',
+        q: 'Mean salary rose from €78,667 → €86,250 when x joined.',
         prompt: "What is x's salary range?",
-        options: ['Below $70k', '$70k – $90k', 'Above $90k'],
+        options: ['Below €70k', '€70k – €90k', 'Above €90k'],
         correct: 2,
-        math: `x's salary = 16 × $86,250 − 15 × $78,667 = $1,380,000 − $1,180,005 = $199,995 ≈ $200,000`,
+        math: `x's salary = 16 × €86,250 − 15 × €78,667 = €1,380,000 − €1,180,005 = €199,995 ≈ €200,000`,
       },
     ];
 
@@ -372,7 +372,7 @@
                       <tr key={r.id} className="border-t border-gray-800/60 text-gray-300 hover:bg-gray-800/30">
                         <td className="px-4 py-2 font-mono">{r.name}</td>
                         <td className={`px-4 py-2 ${DEPT_COLORS[r.dept]}`}>{r.dept}</td>
-                        <td className="px-4 py-2 text-right">${r.salary.toLocaleString()}</td>
+                        <td className="px-4 py-2 text-right">€{r.salary.toLocaleString()}</td>
                         <td className="px-4 py-2 text-right">{r.sick}</td>
                       </tr>
                     ))}
@@ -396,7 +396,7 @@
                 const changed = xAdded && delta !== 0;
                 const up      = delta > 0;
                 const contextLines = [
-                  'Eng avg $93k · Sales $73k · HR $64k',
+                  'Eng avg €93k · Sales €73k · HR €64k',
                   'Eng 4.8 · Sales 7.6 · HR 6.8 days/yr',
                   '6 Engineering · 5 Sales · 4 HR',
                 ];
@@ -529,7 +529,7 @@
                   </div>
                   <div className="text-right text-sm font-mono space-y-0.5">
                     <div className="text-cispa-light font-semibold">{PERSON_X.name}</div>
-                    <div className="text-gray-400">salary: ${PERSON_X.salary.toLocaleString()}</div>
+                    <div className="text-gray-400">salary: €{PERSON_X.salary.toLocaleString()}</div>
                   </div>
                 </div>
                 <button onClick={onContinue}
@@ -558,7 +558,7 @@
       const axisY = H - PAD_B + 6;
       const meanVal  = xAdded ? STATS_DX.avgSalary : STATS_D.avgSalary;
       const meanLineX = toX(meanVal);
-      const meanLabel = xAdded ? '$86,250' : '$78,667';
+      const meanLabel = xAdded ? '€86,250' : '€78,667';
 
       return (
         <svg width="100%" viewBox={`0 0 ${W} ${H}`} className="overflow-visible">
@@ -569,12 +569,12 @@
             return (
               <g key={k}>
                 <line x1={xp} x2={xp} y1={axisY} y2={axisY + 3} stroke="#4b5563" strokeWidth="0.8" />
-                <text x={xp} y={axisY + 11} fontSize="7" fill="#6b7280" textAnchor="middle">${k}k</text>
+                <text x={xp} y={axisY + 11} fontSize="7" fill="#6b7280" textAnchor="middle">€{k}k</text>
               </g>
             );
           })}
           {xAdded && (
-            <text x={toX(PERSON_X.salary)} y={axisY + 11} fontSize="7" fill="#4DC8E0" textAnchor="middle">$200k</text>
+            <text x={toX(PERSON_X.salary)} y={axisY + 11} fontSize="7" fill="#4DC8E0" textAnchor="middle">€200k</text>
           )}
 
           {/* Mean dashed line */}
@@ -631,12 +631,9 @@
       const refLine = mode === 'mean' ? muD         : trueSalary;   // amber line
       const blueVal = mode === 'mean' ? muDX        : inferredSalary; // teal marker
 
-      const halfSpan = Math.max(
-        mode === 'mean' ? 30000 : 150000,
-        scale * 3.5
-      );
-      const xMin = Math.min(centre, refLine) - halfSpan;
-      const xMax = Math.max(centre, refLine) + halfSpan;
+      const halfSpan = Math.max(30000, scale * 3.5);
+      const xMin = mode === 'salary' ? 0        : Math.min(centre, refLine) - halfSpan;
+      const xMax = mode === 'salary' ? 400000   : Math.max(centre, refLine) + halfSpan;
       const toSvgX = v => ((v - xMin) / (xMax - xMin)) * W;
 
       const laplacePdf = x => {
@@ -663,12 +660,13 @@
       // overlap = distribution wide enough to cover the reference line
       const overlapping = epsilon !== Infinity && scale > Math.abs(centre - refLine) * 0.5;
 
-      // x-axis ticks: 6 evenly spaced values
-      const tickCount = 6;
-      const ticks = Array.from({ length: tickCount }, (_, i) => {
-        const val = xMin + (i / (tickCount - 1)) * (xMax - xMin);
-        return { val, x: toSvgX(val) };
-      });
+      // x-axis ticks
+      const ticks = mode === 'salary'
+        ? [0, 100000, 200000, 300000, 400000].map(val => ({ val, x: toSvgX(val) }))
+        : Array.from({ length: 6 }, (_, i) => {
+            const val = xMin + (i / 5) * (xMax - xMin);
+            return { val, x: toSvgX(val) };
+          });
 
       const refLabel  = mode === 'mean' ? 'mean(D)'    : 'true salary';
       const blueLabel = mode === 'mean' ? 'mean(D+x)'  : 'inferred';
@@ -718,7 +716,7 @@
               <g key={i}>
                 <line x1={x} y1={H-10} x2={x} y2={H-7} stroke="#4B5563" strokeWidth="0.5" />
                 <text x={x} y={H-5} textAnchor="middle" fontSize="7" fill="#6B7280" dominantBaseline="hanging">
-                  {val >= 1000 ? `$${Math.round(val/1000)}k` : `$${Math.round(val)}`}
+                  {val >= 1000 ? `€${Math.round(val/1000)}k` : `€${Math.round(val)}`}
                 </text>
               </g>
             ))}
@@ -783,7 +781,7 @@
                      'Maximum protection';
 
       const inferredFmt = inferredSalary < 0
-        ? `−$${Math.abs(Math.round(inferredSalary)).toLocaleString()}`
+        ? `−€${Math.abs(Math.round(inferredSalary)).toLocaleString()}`
         : def.fmt(inferredSalary);
 
       return (
@@ -791,7 +789,7 @@
           <StepBar current={2} onStep={goToStep} showAdvanced={showAdvanced} onToggleAdvanced={onToggleAdvanced} />
           <h2 className="text-2xl font-bold mb-0.5 shrink-0">Differential privacy</h2>
           <p className="text-sm text-gray-500 mb-3 shrink-0">
-            We add Laplace noise only to the D+x query. Can the analyst still infer x's salary of <span className="font-mono text-amber-300">$200,000</span>?
+            We add Laplace noise only to the D+x query. Can the analyst still infer x's salary of <span className="font-mono text-amber-300">€200,000</span>?
           </p>
 
           {/* Slider */}
@@ -839,7 +837,7 @@
               <div className="text-sm text-gray-700 mt-1.5 font-mono">
                 true: {def.fmt(STATS_DX.avgSalary)}
                 {' · noise: '}
-                {epsilon === Infinity ? '±$0' : `±${def.fmt(noiseScale)}`}
+                {epsilon === Infinity ? '±€0' : `±${def.fmt(noiseScale)}`}
               </div>
             </div>
           </div>
@@ -856,7 +854,7 @@
               <div>
                 <div className="font-mono text-4xl font-bold text-gray-100">{inferredFmt}</div>
                 <div className="text-sm text-gray-500 mt-1 font-mono">
-                  true: $200,000 · error: {def.fmt(salaryError)}
+                  true: €200,000 · error: {def.fmt(salaryError)}
                 </div>
               </div>
               <div className={`shrink-0 text-base font-semibold px-5 py-3 rounded-lg border transition-all duration-500 ${
