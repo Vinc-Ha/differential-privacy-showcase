@@ -5,7 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Experience Differential Privacy</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script>tailwind.config = { darkMode: 'class', theme: { extend: {} } }</script>
+  <script>tailwind.config = {
+    darkMode: 'class',
+    theme: { extend: { colors: {
+      cispa: { DEFAULT:'#0091B5', light:'#4DC8E0', dark:'#006B8A', dim:'#003D52' }
+    }}}
+  }</script>
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -14,7 +19,51 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useMemo } = React;
+    // ─── Inject light-mode CSS after Tailwind's sheet ────────────────────────
+    ;(() => {
+      const s = document.createElement('style');
+      s.id = 'dp-light-theme';
+      s.textContent = `
+        html.light body,[html.light] { background-color:#f1f5f9!important; color:#0f172a!important; }
+        html.light [class*="bg-gray-950"] { background-color:#f1f5f9!important; }
+        html.light [class*="bg-gray-900"] { background-color:#ffffff!important; }
+        html.light [class*="bg-gray-800"] { background-color:#e2e8f0!important; }
+        html.light [class*="border-gray-8"] { border-color:#cbd5e1!important; }
+        html.light [class*="border-gray-7"] { border-color:#e2e8f0!important; }
+        html.light .text-gray-100 { color:#0f172a!important; }
+        html.light .text-gray-200 { color:#1e293b!important; }
+        html.light .text-gray-300 { color:#334155!important; }
+        html.light .text-gray-400 { color:#475569!important; }
+        html.light .text-gray-500 { color:#64748b!important; }
+        html.light .text-gray-600 { color:#94a3b8!important; }
+        html.light .text-gray-700 { color:#b0bec5!important; }
+        html.light [class*="bg-red-950"]    { background-color:rgba(254,226,226,.7)!important; }
+        html.light [class*="bg-green-950"]  { background-color:rgba(220,252,231,.7)!important; }
+        html.light [class*="bg-amber-950"]  { background-color:rgba(254,243,199,.7)!important; }
+        html.light [class*="bg-cispa-dim"]  { background-color:rgba(224,242,254,.8)!important; }
+        html.light [class*="border-red-9"]  { border-color:#fca5a5!important; }
+        html.light [class*="border-green-9"]{ border-color:#86efac!important; }
+        html.light [class*="border-amber-8"],html.light [class*="border-amber-9"] { border-color:#fde68a!important; }
+        html.light [class*="border-cispa-dim"] { border-color:#bfdbfe!important; }
+        html.light .text-red-300   { color:#dc2626!important; }
+        html.light .text-red-400   { color:#ef4444!important; }
+        html.light .text-green-300 { color:#16a34a!important; }
+        html.light .text-green-400 { color:#22c55e!important; }
+        html.light .text-amber-300 { color:#b45309!important; }
+        html.light .text-amber-400 { color:#d97706!important; }
+        html.light .text-amber-500 { color:#f59e0b!important; }
+        html.light .text-emerald-400 { color:#059669!important; }
+        html.light select { background-color:#fff!important; color:#0f172a!important; border-color:#cbd5e1!important; }
+        .theme-toggle { font-size:1.1rem; background:none; border:none; cursor:pointer; transition:opacity .2s; }
+        .theme-toggle:hover { opacity:.7; }
+      `;
+      document.head.appendChild(s);
+    })();
+
+    const { useState, useMemo, useEffect, useContext, createContext } = React;
+
+    // ─── Theme context ────────────────────────────────────────────────────────
+    const ThemeCtx = createContext({ isDark: true, toggleDark: () => {} });
 
     // ─── Dataset ──────────────────────────────────────────────────────────────
     const DATABASE_D = [
@@ -229,18 +278,32 @@
 
     // ─── Step bar ─────────────────────────────────────────────────────────────
     function StepBar({ current, onStep }) {
+      const { isDark, toggleDark } = useContext(ThemeCtx);
       const steps = ['D vs D+x', 'Infer x', 'DP', 'ML model', 'Research'];
       return (
-        <div className="flex items-center gap-1 mb-8">
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <div className="bg-white rounded-lg px-4 py-1.5">
+              <img src="769b98b74099646aa6bb597caefa24abfbecd74b.png"
+                alt="CISPA" className="h-6 w-auto" />
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] text-gray-700 uppercase tracking-wider">Differential Privacy</span>
+              <button onClick={toggleDark} className="theme-toggle" title="Toggle light/dark mode">
+                {isDark ? '☀️' : '🌙'}
+              </button>
+            </div>
+          </div>
+        <div className="flex items-center gap-1">
           {steps.map((s, i) => (
             <React.Fragment key={s}>
               <button onClick={() => onStep(i)}
                 className={`flex items-center gap-1.5 text-xs transition-colors cursor-pointer ${
-                  i === current ? 'text-indigo-300' :
+                  i === current ? 'text-cispa-light' :
                   i < current  ? 'text-gray-500 hover:text-gray-300' :
                                  'text-gray-700 hover:text-gray-500'}`}>
                 <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                  i === current ? 'bg-indigo-600 text-white' :
+                  i === current ? 'bg-cispa text-white' :
                   i < current  ? 'bg-gray-800 text-gray-500' :
                                  'border border-gray-800 text-gray-700'}`}>{i+1}</span>
                 <span className="hidden sm:inline">{s}</span>
@@ -249,13 +312,23 @@
             </React.Fragment>
           ))}
         </div>
+        </div>
       );
     }
 
     // ─── Landing ──────────────────────────────────────────────────────────────
     function Landing({ onStart }) {
+      const { isDark, toggleDark } = useContext(ThemeCtx);
       return (
-        <div className="min-h-screen flex flex-col items-center justify-center text-center px-8 gap-6">
+        <div className="relative min-h-screen flex flex-col items-center justify-center text-center px-8 gap-6">
+          <button onClick={toggleDark} className="theme-toggle absolute top-6 right-6" title="Toggle light/dark mode">
+            {isDark ? '☀️' : '🌙'}
+          </button>
+          <div className="bg-white rounded-2xl px-8 py-4 shadow-lg">
+            <img src="769b98b74099646aa6bb597caefa24abfbecd74b.png"
+              alt="CISPA – Helmholtz Center for Information Security"
+              className="h-12 w-auto" />
+          </div>
           <h1 className="text-4xl sm:text-5xl font-bold max-w-2xl leading-tight">
             What can aggregate statistics<br className="hidden sm:block" />reveal about you?
           </h1>
@@ -264,7 +337,7 @@
             is enough to infer your exact salary.
           </p>
           <button onClick={onStart}
-            className="px-8 py-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 font-medium transition-colors">
+            className="px-8 py-3 rounded-lg bg-cispa hover:bg-cispa-light font-medium transition-colors">
             Show me
           </button>
         </div>
@@ -273,7 +346,7 @@
 
     // ─── Phase 1: D vs D+x ───────────────────────────────────────────────────
     const DEPT_COLORS = {
-      Engineering: 'text-indigo-400',
+      Engineering: 'text-cispa',
       Sales:       'text-emerald-400',
       HR:          'text-amber-400',
     };
@@ -289,7 +362,7 @@
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-xl font-bold">
-                Database <span className="font-mono text-indigo-300">{xAdded ? 'D+x' : 'D'}</span>
+                Database <span className="font-mono text-cispa-light">{xAdded ? 'D+x' : 'D'}</span>
                 <span className="text-gray-600 text-sm font-normal ml-2">— {xAdded ? 16 : 15} records</span>
               </h2>
               <p className="text-xs text-gray-500 mt-0.5">
@@ -298,7 +371,7 @@
             </div>
             {!xAdded && (
               <button onClick={() => setXAdded(true)}
-                className="shrink-0 px-4 py-2 rounded-lg border border-dashed border-indigo-600/60 hover:border-indigo-400 hover:bg-indigo-950/30 text-indigo-400 hover:text-indigo-300 text-sm font-medium transition-all">
+                className="shrink-0 px-4 py-2 rounded-lg border border-dashed border-cispa/60 hover:border-indigo-400 hover:bg-cispa-dim/40 text-cispa hover:text-cispa-light text-sm font-medium transition-all">
                 + x joins →
               </button>
             )}
@@ -327,8 +400,8 @@
                       </tr>
                     ))}
                     {xAdded && (
-                      <tr className="border-t-2 border-indigo-500 bg-indigo-950/50">
-                        <td className="px-3 py-2 font-mono text-indigo-300 font-semibold">x</td>
+                      <tr className="border-t-2 border-indigo-500 bg-cispa-dim/60">
+                        <td className="px-3 py-2 font-mono text-cispa-light font-semibold">x</td>
                         <td className="px-3 py-2 text-indigo-800 italic text-[10px]">private</td>
                         <td className="px-3 py-2 text-right text-indigo-800 italic text-[10px]">private</td>
                         <td className="px-3 py-2 text-right text-indigo-800 italic text-[10px]">private</td>
@@ -369,7 +442,7 @@
 
               {xAdded && (
                 <button onClick={onContinue}
-                  className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm font-medium transition-colors mt-2">
+                  className="w-full py-2.5 rounded-xl bg-cispa hover:bg-cispa-light text-sm font-medium transition-colors mt-2">
                   What does this reveal about x? →
                 </button>
               )}
@@ -417,7 +490,7 @@
                             className={`w-full text-left px-3 py-2 rounded-lg border text-sm transition-colors ${
                               correct ? 'border-green-700 bg-green-950/40 text-green-300' :
                               wrong   ? 'border-red-800  bg-red-950/30  text-red-300' :
-                              chosen  ? 'border-indigo-600 bg-indigo-950/40 text-indigo-200' :
+                              chosen  ? 'border-cispa bg-cispa-dim/50 text-cispa-light' :
                                         'border-gray-800 text-gray-400 hover:border-gray-600'
                             } ${revealed ? 'cursor-default' : 'cursor-pointer'}`}>
                             <span className="text-[10px] text-gray-600 font-mono mr-2">{String.fromCharCode(97+oi)})</span>
@@ -444,7 +517,7 @@
           <div className="mt-4 space-y-3">
             {allAnswered && !revealed && (
               <button onClick={() => setRevealed(true)}
-                className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm font-medium transition-colors">
+                className="w-full py-2.5 rounded-xl bg-cispa hover:bg-cispa-light text-sm font-medium transition-colors">
                 Check answers
               </button>
             )}
@@ -458,12 +531,12 @@
                     </span>
                   </div>
                   <div className="text-right text-xs font-mono space-y-0.5">
-                    <div className="text-indigo-300 font-semibold">{PERSON_X.name}</div>
+                    <div className="text-cispa-light font-semibold">{PERSON_X.name}</div>
                     <div className="text-gray-400">salary: ${PERSON_X.salary.toLocaleString()}</div>
                   </div>
                 </div>
                 <button onClick={onContinue}
-                  className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm font-medium transition-colors">
+                  className="w-full py-2.5 rounded-xl bg-cispa hover:bg-cispa-light text-sm font-medium transition-colors">
                   How does DP protect x? →
                 </button>
               </>
@@ -475,7 +548,7 @@
 
     // ─── Phase 3: DP ─────────────────────────────────────────────────────────
     function PhaseDP({ onContinue, onRestart, goToStep }) {
-      const sliderToEps = v => Math.pow(10, -1 + (v / 100) * 2);
+      const sliderToEps = v => v >= 100 ? Infinity : Math.pow(10, -1 + (v / 99) * 2);
       const [sliderVal, setSliderVal] = useState(85);
       const [seed, setSeed] = useState(0);
       const epsilon = sliderToEps(sliderVal);
@@ -489,15 +562,17 @@
       const vDX        = noisyDX.avgSalary;
       const obsDelta   = vDX - vD;
       const trueDelta  = STATS_DX.avgSalary - STATS_D.avgSalary;   // ≈ $4,146
-      const hidden     = Math.abs(obsDelta) <= 1.5 * scale;
-      // How much of the true signal is recoverable (clamped 0–1, inverted for "utility")
-      const signalRatio = Math.min(1, Math.abs(obsDelta) / (1.5 * scale));
+      // Normalize signal and noise to the same reference for the bar chart
+      const ref          = Math.max(scale * 1.1, trueDelta * 2);
+      const signalBarPct = Math.min(95, (trueDelta / ref) * 100);
+      const noiseBarPct  = Math.min(95, (scale    / ref) * 100);
 
       const protection =
+        epsilon === Infinity ? "No privacy at all — true values returned exactly" :
         epsilon < 0.5 ? "Strong — x's salary is hidden in noise" :
         epsilon < 2   ? "Moderate — signal may still be detectable" :
         epsilon < 5   ? "Weak — salary change visible to analyst" :
-                        "Minimal — salary change fully exposed";
+                        "Minimal — noise barely conceals the signal";
 
       return (
         <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8">
@@ -512,13 +587,13 @@
           <div className="border border-gray-800 rounded-xl p-4 mb-5 space-y-2">
             <div className="flex justify-between text-[10px] text-gray-600 uppercase tracking-wider">
               <span>← high privacy (ε = 0.1)</span>
-              <span>no privacy (ε = 10) →</span>
+              <span>no DP (ε = ∞) →</span>
             </div>
             <input type="range" min="0" max="100" step="1" value={sliderVal}
               onChange={e => setSliderVal(Number(e.target.value))}
-              className="w-full accent-indigo-500 cursor-pointer" />
+              className="w-full accent-cispa cursor-pointer" />
             <div className="flex items-center gap-3">
-              <span className="text-2xl font-mono font-bold text-indigo-300">ε = {epsilon.toFixed(2)}</span>
+              <span className="text-2xl font-mono font-bold text-cispa-light">ε = {epsilon === Infinity ? '∞' : epsilon.toFixed(2)}</span>
               <span className="text-xs text-gray-500 flex-1 italic">{protection}</span>
               <button onClick={() => setSeed(s => s+1)}
                 className="text-[11px] text-gray-600 hover:text-gray-400 border border-gray-800 rounded px-2 py-1 transition-colors">
@@ -542,55 +617,67 @@
           </div>
 
           {/* Signal vs noise panel */}
-          <div className={`border rounded-xl p-5 mb-5 transition-colors duration-500 ${
-            hidden ? 'border-green-900/60 bg-green-950/15' : 'border-red-900/60 bg-red-950/15'}`}>
+          <div className="border border-gray-800 rounded-xl p-5 mb-5">
 
-            <div className="flex items-start justify-between mb-4">
+            <div className="flex items-start justify-between mb-5">
               <div>
                 <div className="text-[10px] text-gray-600 uppercase tracking-wider mb-1">Reported salary change</div>
-                <div className={`font-mono text-3xl font-bold ${obsDelta >= 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                <div className="font-mono text-3xl font-bold text-gray-100">
                   {obsDelta >= 0 ? '+' : '−'}{def.fmt(Math.abs(obsDelta))}
                 </div>
-                <div className="text-[10px] text-gray-600 mt-1">true signal: <span className="text-amber-500 font-mono">+{def.fmt(trueDelta)}</span></div>
+                <div className="text-[10px] text-gray-600 mt-1 font-mono">
+                  (reported D+x) − (reported D)
+                </div>
               </div>
               <div className="text-right">
-                <div className="text-[10px] text-gray-600 uppercase tracking-wider mb-1">Noise scale</div>
-                <div className="font-mono text-xl text-gray-400">±{def.fmt(scale)}</div>
-                <div className="text-[10px] text-gray-700 mt-1">Laplace(0, Δf/ε)</div>
+                <div className="text-[10px] text-gray-600 uppercase tracking-wider mb-1">True signal</div>
+                <div className="font-mono text-xl text-amber-400">+{def.fmt(trueDelta)}</div>
+                <div className="text-[10px] text-gray-700 mt-1">x's salary contribution</div>
               </div>
             </div>
 
-            {/* Signal-to-noise bar */}
-            <div className="mb-3">
-              <div className="flex justify-between text-[9px] text-gray-700 mb-1 uppercase tracking-wider">
-                <span>Signal vs noise</span>
-                <span>{hidden ? 'signal buried' : 'signal visible'}</span>
+            {/* Side-by-side bars */}
+            <div className="space-y-2.5">
+              <div>
+                <div className="flex justify-between text-[10px] text-gray-500 mb-1">
+                  <span>True signal</span>
+                  <span className="font-mono text-amber-400">+{def.fmt(trueDelta)}</span>
+                </div>
+                <div className="h-3 bg-gray-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-amber-500/70 rounded-full transition-all duration-500"
+                    style={{ width: `${signalBarPct}%` }} />
+                </div>
               </div>
-              <div className="h-2.5 bg-gray-800 rounded-full overflow-hidden">
-                <div className={`h-full rounded-full transition-all duration-500 ${hidden ? 'bg-green-700' : 'bg-red-600'}`}
-                  style={{ width: `${Math.round(signalRatio * 100)}%` }} />
+              <div>
+                <div className="flex justify-between text-[10px] text-gray-500 mb-1">
+                  <span>Noise scale  (Laplace Δf / ε)</span>
+                  <span className="font-mono text-gray-400">{epsilon === Infinity ? '±$0 — no noise' : `±${def.fmt(scale)}`}</span>
+                </div>
+                <div className="h-3 bg-gray-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-cispa/60 rounded-full transition-all duration-500"
+                    style={{ width: `${noiseBarPct}%` }} />
+                </div>
               </div>
             </div>
 
-            <div className={`rounded-lg py-3 px-4 text-center font-semibold text-sm transition-colors duration-500 ${
-              hidden ? 'bg-green-900/30 text-green-300' : 'bg-red-900/30 text-red-300'}`}>
-              {hidden
-                ? "✓  Noise swamps the signal — x's salary is unrecoverable"
-                : "✗  Signal still detectable — analyst can back-calculate x's salary"}
-            </div>
+            <p className="text-[10px] text-gray-600 mt-3 italic">
+              When the noise bar exceeds the signal bar, the salary change is indistinguishable from random fluctuation.
+            </p>
           </div>
 
           {/* Formal guarantee */}
-          <div className="border border-indigo-900/40 bg-indigo-950/20 rounded-xl p-4 mb-6">
-            <div className="text-[10px] text-indigo-600 uppercase tracking-wider mb-2">Formal ε-DP guarantee</div>
-            <div className="font-mono text-sm text-indigo-300">
+          <div className="border border-cispa-dim/80 bg-cispa-dim/30 rounded-xl p-4 mb-6">
+            <div className="text-[10px] text-cispa uppercase tracking-wider mb-2">Formal ε-DP guarantee</div>
+            <div className="font-mono text-sm text-cispa-light">
               P[M(D) = O] ≤ e<sup>ε</sup> · P[M(D+x) = O] &nbsp;&nbsp; ∀ outputs O
             </div>
             <p className="text-xs text-gray-600 mt-2">
-              At ε = {epsilon.toFixed(2)}, D and D+x produce outputs within a factor of {Math.exp(epsilon).toFixed(2)} of each other.
-              {Math.exp(epsilon) < 1.5 ? ' Practically indistinguishable.' :
-               Math.exp(epsilon) < 5   ? ' Some distinguishability remains.' :
-                                         ' Easily distinguished — x is exposed.'}
+              {epsilon === Infinity
+                ? 'At ε = ∞, no noise is added. D and D+x produce different outputs with probability 1 — x is fully exposed.'
+                : `At ε = ${epsilon.toFixed(2)}, D and D+x produce outputs within a factor of ${Math.exp(epsilon).toFixed(2)} of each other.${
+                    Math.exp(epsilon) < 1.5 ? ' Practically indistinguishable.' :
+                    Math.exp(epsilon) < 5   ? ' Some distinguishability remains.' :
+                                              ' Easily distinguished — x is exposed.'}`}
             </p>
           </div>
 
@@ -600,7 +687,7 @@
               ← Start over
             </button>
             <button onClick={onContinue}
-              className="ml-auto px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm font-medium transition-colors">
+              className="ml-auto px-5 py-2.5 rounded-xl bg-cispa hover:bg-cispa-light text-sm font-medium transition-colors">
               See it in a trained ML model →
             </button>
           </div>
@@ -610,8 +697,8 @@
 
     // ─── Phase 4: ML model ───────────────────────────────────────────────────
     function PhaseML({ onContinue, onRestart, goToStep }) {
-      const sliderToEps = v => Math.pow(10, -1 + (v / 100) * 2);
-      const [sliderVal, setSliderVal] = useState(80);
+      const sliderToEps = v => v >= 100 ? Infinity : Math.pow(10, -1 + (v / 99) * 2);
+      const [sliderVal, setSliderVal] = useState(100);
       const epsilon = sliderToEps(sliderVal);
 
       const [selectedId, setSelectedId] = useState(DATABASE_DX[0].id);
@@ -620,10 +707,11 @@
       const completion = getCompletion(emp, epsilon, sliderVal);
 
       const protection =
+        epsilon === Infinity ? 'No DP — model fully memorizes training data' :
         epsilon < 0.5 ? 'Strong DP — both attacks fail' :
         epsilon < 2   ? 'Moderate DP — extraction noisy, inference near chance' :
         epsilon < 5   ? 'Weak DP — some leakage visible' :
-                        'No DP — model memorizes training data';
+                        'Minimal DP — significant leakage';
 
       return (
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
@@ -639,13 +727,13 @@
           <div className="border border-gray-800 rounded-xl p-4 mb-6 space-y-2">
             <div className="flex justify-between text-[10px] text-gray-600 uppercase tracking-wider">
               <span>← strong DP (ε = 0.1)</span>
-              <span>no DP (ε = 10) →</span>
+              <span>no DP (ε = ∞) →</span>
             </div>
             <input type="range" min="0" max="100" step="1" value={sliderVal}
               onChange={e => setSliderVal(Number(e.target.value))}
-              className="w-full accent-indigo-500 cursor-pointer" />
+              className="w-full accent-cispa cursor-pointer" />
             <div className="flex items-center gap-3">
-              <span className="text-2xl font-mono font-bold text-indigo-300">ε = {epsilon.toFixed(2)}</span>
+              <span className="text-2xl font-mono font-bold text-cispa-light">ε = {epsilon === Infinity ? '∞' : epsilon.toFixed(2)}</span>
               <span className="text-xs text-gray-500 flex-1 italic">{protection}</span>
             </div>
           </div>
@@ -715,7 +803,7 @@
                     Select employee
                   </label>
                   <select value={selectedId} onChange={e => setSelectedId(Number(e.target.value))}
-                    className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-600">
+                    className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-cispa">
                     {DATABASE_DX.map(r => (
                       <option key={r.id} value={r.id}>
                         {r.name}{r.id === 16 ? ' ← x' : ''}
@@ -780,7 +868,7 @@
               ← Start over
             </button>
             <button onClick={onContinue}
-              className="ml-auto px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm font-medium transition-colors">
+              className="ml-auto px-5 py-2.5 rounded-xl bg-cispa hover:bg-cispa-light text-sm font-medium transition-colors">
               Why this matters for AI research →
             </button>
           </div>
@@ -843,11 +931,11 @@
               </div>
             </div>
 
-            <div className="border border-indigo-900/40 bg-indigo-950/20 rounded-xl p-5">
+            <div className="border border-cispa-dim/80 bg-cispa-dim/30 rounded-xl p-5">
               <div className="flex items-start gap-4">
                 <span className="text-2xl shrink-0">🔬</span>
                 <div>
-                  <h3 className="font-semibold text-indigo-200 mb-1.5">The open problem</h3>
+                  <h3 className="font-semibold text-cispa-light mb-1.5">The open problem</h3>
                   <p className="text-sm text-gray-400 leading-relaxed">
                     Can we fine-tune or train large foundation models on sensitive data — medical records,
                     financial data, private text — while providing meaningful differential privacy guarantees
@@ -857,7 +945,7 @@
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {['DP fine-tuning', 'Privacy auditing', 'Tight composition', 'DP synthetic data', 'Membership inference'].map(t => (
-                      <span key={t} className="text-[11px] bg-indigo-950/60 border border-indigo-900/40 text-indigo-400 rounded-full px-2.5 py-1">
+                      <span key={t} className="text-[11px] bg-cispa-dim/70 border border-cispa-dim/80 text-cispa rounded-full px-2.5 py-1">
                         {t}
                       </span>
                     ))}
@@ -881,14 +969,29 @@
     // ─── App ─────────────────────────────────────────────────────────────────
     function App() {
       const [phase, setPhase] = useState('landing');
+      const [isDark, setIsDark] = useState(true);
+      const toggleDark = () => setIsDark(d => !d);
+
+      useEffect(() => {
+        document.documentElement.classList.toggle('light', !isDark);
+      }, [isDark]);
+
       const PHASES = ['compare', 'mcqa', 'dp', 'ml', 'research'];
       const goToStep = i => setPhase(PHASES[i]);
-      if (phase==='landing')  return <Landing         onStart={()    => setPhase('compare')} />;
-      if (phase==='compare')  return <PhaseCompare    onContinue={() => setPhase('mcqa')}     goToStep={goToStep} />;
-      if (phase==='mcqa')     return <PhaseMCQA       onContinue={() => setPhase('dp')}       goToStep={goToStep} />;
-      if (phase==='dp')       return <PhaseDP         onContinue={() => setPhase('ml')} onRestart={() => setPhase('landing')} goToStep={goToStep} />;
-      if (phase==='ml')       return <PhaseML         onContinue={() => setPhase('research')} onRestart={() => setPhase('landing')} goToStep={goToStep} />;
-      if (phase==='research') return <PhaseResearch   onRestart={() => setPhase('landing')}   goToStep={goToStep} />;
+
+      let content;
+      if (phase==='landing')  content = <Landing         onStart={()    => setPhase('compare')} />;
+      else if (phase==='compare')  content = <PhaseCompare    onContinue={() => setPhase('mcqa')}     goToStep={goToStep} />;
+      else if (phase==='mcqa')     content = <PhaseMCQA       onContinue={() => setPhase('dp')}       goToStep={goToStep} />;
+      else if (phase==='dp')       content = <PhaseDP         onContinue={() => setPhase('ml')} onRestart={() => setPhase('landing')} goToStep={goToStep} />;
+      else if (phase==='ml')       content = <PhaseML         onContinue={() => setPhase('research')} onRestart={() => setPhase('landing')} goToStep={goToStep} />;
+      else if (phase==='research') content = <PhaseResearch   onRestart={() => setPhase('landing')}   goToStep={goToStep} />;
+
+      return (
+        <ThemeCtx.Provider value={{ isDark, toggleDark }}>
+          {content}
+        </ThemeCtx.Provider>
+      );
     }
 
     ReactDOM.createRoot(document.getElementById('root')).render(<App />);
