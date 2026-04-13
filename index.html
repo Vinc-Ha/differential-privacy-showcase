@@ -15,7 +15,7 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
-<body class="dark bg-gray-950 text-gray-100 min-h-screen antialiased">
+<body class="dark bg-gray-950 text-gray-100 overflow-hidden antialiased">
   <div id="root"></div>
 
   <script type="text/babel">
@@ -84,7 +84,6 @@
       { id:15, name:'Oscar M.',   dept:'HR',          salary:63000,  sick:7 },
     ];
 
-    // x's individual record is hidden from the analyst — revealed only after the quiz
     const PERSON_X = { id:16, name:'Morgan X.', dept:'Engineering', salary:145000, sick:2 };
     const DATABASE_DX = [...DATABASE_D, PERSON_X];
 
@@ -99,8 +98,8 @@
       };
     }
 
-    const STATS_D  = computeStats(DATABASE_D);   // avgSalary≈78667, avgSick≈6.27, eng=6, max=105000
-    const STATS_DX = computeStats(DATABASE_DX);  // avgSalary≈82813, avgSick≈6.00, eng=7, max=145000
+    const STATS_D  = computeStats(DATABASE_D);
+    const STATS_DX = computeStats(DATABASE_DX);
 
     const STAT_DEFS = [
       { key:'avgSalary', label:'Mean salary',           icon:'💼',
@@ -129,8 +128,6 @@
     }
 
     // ─── ML Phase data & helpers ──────────────────────────────────────────────
-    // Unit noise is fixed per employee (computed once at load) so extraction
-    // values are deterministic per (employee, ε) — no resample needed.
     const UNIT_NOISE = Object.fromEntries(
       DATABASE_DX.map(r => [r.id, {
         salary: (Math.random() - 0.5) * 2,
@@ -138,27 +135,19 @@
       }])
     );
 
-    // Each card: text the "model" might reproduce, baseScore = score at ε → ∞
+    // 4 cards (removed the non-member decoys for space)
     const MI_CARDS = [
       { id:'a1', text: 'Alice M. earns $95,000 per year',     baseScore: 0.91 },
-      { id:'a2', text: 'Bob K. takes 12 sick days per year',  baseScore: 0.08 },
       { id:'a3', text: 'Eve P. works in Engineering',         baseScore: 0.89 },
-      { id:'a4', text: 'Carol T. earns $95,000 per year',     baseScore: 0.07 },
       { id:'a5', text: 'Grace H. takes 9 sick days per year', baseScore: 0.87 },
       { id:'a6', text: 'Morgan X. earns $145,000 per year',   baseScore: 0.92, scary: true },
     ];
 
-    // At low ε all scores collapse toward 0.5 (chance); at high ε they spread.
     function membershipScore(baseScore, epsilon) {
       const t = Math.min(1, epsilon / 5);
       return baseScore * t + 0.5 * (1 - t);
     }
 
-    // Three quality tiers for text completion:
-    //   exact     — model reproduces training data verbatim (high ε, no DP)
-    //   noisy     — coherent sentence, wrong values (medium ε)
-    //   protected — gibberish / nonsense output (low ε, strong DP)
-    // Seeded PRNG (mulberry32) — deterministic per employee, looks random
     function mulberry32(seed) {
       let a = seed | 0;
       return () => {
@@ -169,7 +158,6 @@
       };
     }
 
-    // Token pool: plausible-sounding but semantically incoherent in combination
     const TOKEN_POOL = [
       'pursuant','amortized','bilateral','contingent','fiduciary',
       'nominal','aggregate','provisional','variable','intermittent',
@@ -189,7 +177,6 @@
       ).join(' ');
     }
 
-    // Adjacent dept names (recognizable but wrong) and qualifier suffixes
     const ADJ_DEPTS = ['Product', 'Finance', 'Legal', 'Operations', 'Marketing', 'IT', 'Strategy'];
     const ADJ_QUAL  = ['Division', 'Services', 'Group', 'Unit', 'Team', 'Ops', 'Bureau'];
     const ADJ_SALS  = [12000, 185000, 22000, 295000, 8500, 42000, 210000, 55000, 3200, 400000];
@@ -213,7 +200,6 @@
                  sick: `${nSick}`, quality: 'noisy' };
       }
 
-      // Protected zone — seed steps every 0.1 ε (not every slider tick)
       const step = Math.round(epsilon * 10);
       const base = emp.id * 997 + step * 137;
       const rD   = mulberry32(base + 1);
@@ -222,7 +208,6 @@
       const pick = (rng, arr) => arr[Math.floor(rng() * arr.length)];
 
       if (epsilon >= 0.9) {
-        // Stage 1: correct format + adjacent suffix — almost recognisable
         const nSal  = Math.max(10000, Math.round(emp.salary + (rS() - 0.5) * 60000));
         const nSick = Math.max(0, Math.round(emp.sick + (rK() - 0.5) * 8));
         return { dept:   `${emp.dept} ${pick(rD, ADJ_QUAL)}`,
@@ -230,13 +215,11 @@
                  sick:   `${nSick}`, quality: 'protected' };
 
       } else if (epsilon >= 0.6) {
-        // Stage 2: fully adjacent — recognizable category, plausible but wrong values
         return { dept:   pick(rD,  ADJ_DEPTS),
                  salary: `$${pick(rS, ADJ_SALS).toLocaleString()}`,
                  sick:   `${pick(rK, ADJ_SICK)}`, quality: 'protected' };
 
       } else if (epsilon >= 0.3) {
-        // Stage 3: adjacent word + random token mixed
         const tok1 = TOKEN_POOL[Math.floor(rD()  * TOKEN_POOL.length)];
         const tok2 = TOKEN_POOL[Math.floor(rS()  * TOKEN_POOL.length)];
         const tok3 = TOKEN_POOL[Math.floor(rK()  * TOKEN_POOL.length)];
@@ -245,7 +228,6 @@
                  sick:   tok3, quality: 'protected' };
 
       } else {
-        // Stage 4: fully random tokens
         return { dept:   gibWords(mulberry32(base + 10), 3),
                  salary: gibWords(mulberry32(base + 11), 4),
                  sick:   gibWords(mulberry32(base + 12), 2),
@@ -281,11 +263,11 @@
       const { isDark, toggleDark } = useContext(ThemeCtx);
       const steps = ['D vs D+x', 'Infer x', 'DP', 'ML model', 'Research'];
       return (
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <div className="bg-white rounded-lg px-4 py-1.5">
+        <div className="shrink-0 pb-2">
+          <div className="flex items-center justify-between mb-2">
+            <div className="bg-white rounded-lg px-3 py-1">
               <img src="769b98b74099646aa6bb597caefa24abfbecd74b.png"
-                alt="CISPA" className="h-6 w-auto" />
+                alt="CISPA" className="h-5 w-auto" />
             </div>
             <div className="flex items-center gap-3">
               <span className="text-[10px] text-gray-700 uppercase tracking-wider">Differential Privacy</span>
@@ -294,24 +276,24 @@
               </button>
             </div>
           </div>
-        <div className="flex items-center gap-1">
-          {steps.map((s, i) => (
-            <React.Fragment key={s}>
-              <button onClick={() => onStep(i)}
-                className={`flex items-center gap-1.5 text-xs transition-colors cursor-pointer ${
-                  i === current ? 'text-cispa-light' :
-                  i < current  ? 'text-gray-500 hover:text-gray-300' :
-                                 'text-gray-700 hover:text-gray-500'}`}>
-                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                  i === current ? 'bg-cispa text-white' :
-                  i < current  ? 'bg-gray-800 text-gray-500' :
-                                 'border border-gray-800 text-gray-700'}`}>{i+1}</span>
-                <span className="hidden sm:inline">{s}</span>
-              </button>
-              {i < steps.length-1 && <div className={`flex-1 h-px mx-1 ${i < current ? 'bg-gray-700' : 'bg-gray-800'}`} />}
-            </React.Fragment>
-          ))}
-        </div>
+          <div className="flex items-center gap-1">
+            {steps.map((s, i) => (
+              <React.Fragment key={s}>
+                <button onClick={() => onStep(i)}
+                  className={`flex items-center gap-1.5 text-xs transition-colors cursor-pointer ${
+                    i === current ? 'text-cispa-light' :
+                    i < current  ? 'text-gray-500 hover:text-gray-300' :
+                                   'text-gray-700 hover:text-gray-500'}`}>
+                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                    i === current ? 'bg-cispa text-white' :
+                    i < current  ? 'bg-gray-800 text-gray-500' :
+                                   'border border-gray-800 text-gray-700'}`}>{i+1}</span>
+                  <span className="hidden sm:inline">{s}</span>
+                </button>
+                {i < steps.length-1 && <div className={`flex-1 h-px mx-1 ${i < current ? 'bg-gray-700' : 'bg-gray-800'}`} />}
+              </React.Fragment>
+            ))}
+          </div>
         </div>
       );
     }
@@ -320,7 +302,7 @@
     function Landing({ onStart }) {
       const { isDark, toggleDark } = useContext(ThemeCtx);
       return (
-        <div className="relative min-h-screen flex flex-col items-center justify-center text-center px-8 gap-6">
+        <div className="h-screen flex flex-col items-center justify-center text-center px-8 gap-6">
           <button onClick={toggleDark} className="theme-toggle absolute top-6 right-6" title="Toggle light/dark mode">
             {isDark ? '☀️' : '🌙'}
           </button>
@@ -329,15 +311,15 @@
               alt="CISPA – Helmholtz Center for Information Security"
               className="h-12 w-auto" />
           </div>
-          <h1 className="text-4xl sm:text-5xl font-bold max-w-2xl leading-tight">
+          <h1 className="text-5xl sm:text-6xl font-bold max-w-2xl leading-tight">
             What can aggregate statistics<br className="hidden sm:block" />reveal about you?
           </h1>
-          <p className="text-gray-400 max-w-sm text-sm">
+          <p className="text-gray-400 max-w-md text-base">
             Knowing the mean salary before and after you join a database
             is enough to infer your exact salary.
           </p>
           <button onClick={onStart}
-            className="px-8 py-3 rounded-lg bg-cispa hover:bg-cispa-light font-medium transition-colors">
+            className="px-10 py-4 rounded-lg bg-cispa hover:bg-cispa-light text-base font-medium transition-colors">
             Show me
           </button>
         </div>
@@ -355,56 +337,57 @@
       const [xAdded, setXAdded] = useState(false);
 
       return (
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
+        <div className="h-screen overflow-hidden flex flex-col max-w-5xl mx-auto px-6 py-3">
           <StepBar current={0} onStep={goToStep} />
 
           {/* Header */}
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-2 shrink-0">
             <div>
-              <h2 className="text-xl font-bold">
+              <h2 className="text-2xl font-bold">
                 Database <span className="font-mono text-cispa-light">{xAdded ? 'D+x' : 'D'}</span>
                 <span className="text-gray-600 text-sm font-normal ml-2">— {xAdded ? 16 : 15} records</span>
               </h2>
-              <p className="text-xs text-gray-500 mt-0.5">
-                The analyst sees only the aggregate queries on the right — never individual rows.
+              <p className="text-sm text-gray-500 mt-0.5">
+                The analyst sees only the aggregate statistics on the right — never individual rows.
               </p>
             </div>
             {!xAdded && (
               <button onClick={() => setXAdded(true)}
-                className="shrink-0 px-4 py-2 rounded-lg border border-dashed border-cispa/60 hover:border-indigo-400 hover:bg-cispa-dim/40 text-cispa hover:text-cispa-light text-sm font-medium transition-all">
+                className="shrink-0 px-4 py-2.5 rounded-lg border border-dashed border-cispa/60 hover:border-indigo-400 hover:bg-cispa-dim/40 text-cispa hover:text-cispa-light text-sm font-medium transition-all">
                 + x joins →
               </button>
             )}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-            {/* Table — 3 cols */}
-            <div className="lg:col-span-3 border border-gray-800 rounded-xl overflow-hidden">
-              <div className="overflow-y-auto" style={{ maxHeight: '420px' }}>
-                <table className="w-full text-xs">
+          {/* Content grid — fills remaining height */}
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-5 gap-4 min-h-0">
+            {/* Table */}
+            <div className="lg:col-span-3 border border-gray-800 rounded-xl overflow-hidden flex flex-col min-h-0">
+              <div className="flex-1 overflow-y-auto">
+                <table className="w-full text-sm">
                   <thead className="sticky top-0 bg-gray-900 text-gray-500">
                     <tr>
-                      <th className="px-3 py-2.5 text-left font-medium">Name</th>
-                      <th className="px-3 py-2.5 text-left font-medium">Dept</th>
-                      <th className="px-3 py-2.5 text-right font-medium">Salary</th>
-                      <th className="px-3 py-2.5 text-right font-medium">Sick days</th>
+                      <th className="px-4 py-3 text-left font-medium">Name</th>
+                      <th className="px-4 py-3 text-left font-medium">Dept</th>
+                      <th className="px-4 py-3 text-right font-medium">Salary</th>
+                      <th className="px-4 py-3 text-right font-medium">Sick days</th>
                     </tr>
                   </thead>
                   <tbody className="bg-gray-900/30">
                     {DATABASE_D.map(r => (
                       <tr key={r.id} className="border-t border-gray-800/60 text-gray-300 hover:bg-gray-800/30">
-                        <td className="px-3 py-1.5 font-mono">{r.name}</td>
-                        <td className={`px-3 py-1.5 ${DEPT_COLORS[r.dept]}`}>{r.dept}</td>
-                        <td className="px-3 py-1.5 text-right">${r.salary.toLocaleString()}</td>
-                        <td className="px-3 py-1.5 text-right">{r.sick}</td>
+                        <td className="px-4 py-2 font-mono">{r.name}</td>
+                        <td className={`px-4 py-2 ${DEPT_COLORS[r.dept]}`}>{r.dept}</td>
+                        <td className="px-4 py-2 text-right">${r.salary.toLocaleString()}</td>
+                        <td className="px-4 py-2 text-right">{r.sick}</td>
                       </tr>
                     ))}
                     {xAdded && (
                       <tr className="border-t-2 border-indigo-500 bg-cispa-dim/60">
-                        <td className="px-3 py-2 font-mono text-cispa-light font-semibold">x</td>
-                        <td className="px-3 py-2 text-indigo-800 italic text-[10px]">private</td>
-                        <td className="px-3 py-2 text-right text-indigo-800 italic text-[10px]">private</td>
-                        <td className="px-3 py-2 text-right text-indigo-800 italic text-[10px]">private</td>
+                        <td className="px-4 py-2.5 font-mono text-cispa-light font-semibold">x</td>
+                        <td className="px-4 py-2.5 text-indigo-800 italic text-xs">private</td>
+                        <td className="px-4 py-2.5 text-right text-indigo-800 italic text-xs">private</td>
+                        <td className="px-4 py-2.5 text-right text-indigo-800 italic text-xs">private</td>
                       </tr>
                     )}
                   </tbody>
@@ -412,8 +395,8 @@
               </div>
             </div>
 
-            {/* Stats — 2 cols */}
-            <div className="lg:col-span-2 space-y-2">
+            {/* Stats */}
+            <div className="lg:col-span-2 flex flex-col gap-2 min-h-0">
               {STAT_DEFS.map(def => {
                 const dVal    = STATS_D[def.key];
                 const dxVal   = STATS_DX[def.key];
@@ -421,17 +404,17 @@
                 const changed = xAdded && delta !== 0;
                 const up      = delta > 0;
                 return (
-                  <div key={def.key} className={`border rounded-xl px-4 py-3 transition-all duration-500 ${
+                  <div key={def.key} className={`border rounded-xl px-4 py-3 flex-1 transition-all duration-500 ${
                     changed ? 'border-amber-700/50 bg-amber-950/20' : 'border-gray-800 bg-gray-900/40'}`}>
-                    <div className="text-[10px] text-gray-600 uppercase tracking-wider mb-1">
+                    <div className="text-xs text-gray-600 uppercase tracking-wider mb-1">
                       {def.icon} {def.label}
                     </div>
                     <div className="flex items-end justify-between">
-                      <span className="font-mono text-lg font-bold">
+                      <span className="font-mono text-xl font-bold">
                         {def.fmt(xAdded ? dxVal : dVal)}
                       </span>
                       {changed && (
-                        <span className={`text-xs font-mono font-bold ${up ? 'text-red-400' : 'text-emerald-400'}`}>
+                        <span className={`text-sm font-mono font-bold ${up ? 'text-red-400' : 'text-emerald-400'}`}>
                           {up ? '▲' : '▼'} {def.fmt(Math.abs(delta))}
                         </span>
                       )}
@@ -442,7 +425,7 @@
 
               {xAdded && (
                 <button onClick={onContinue}
-                  className="w-full py-2.5 rounded-xl bg-cispa hover:bg-cispa-light text-sm font-medium transition-colors mt-2">
+                  className="w-full py-3 rounded-xl bg-cispa hover:bg-cispa-light text-sm font-medium transition-colors shrink-0">
                   What does this reveal about x? →
                 </button>
               )}
@@ -460,40 +443,38 @@
       const score = QUESTIONS.filter(q => guesses[q.key] === q.correct).length;
 
       return (
-        <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8">
+        <div className="h-screen overflow-hidden flex flex-col max-w-2xl mx-auto px-6 py-3">
           <StepBar current={1} onStep={goToStep} />
-          <h2 className="text-xl font-bold mb-1">Infer x's profile</h2>
-          <p className="text-xs text-gray-500 mb-6">
+          <h2 className="text-2xl font-bold mb-1 shrink-0">Infer x's profile</h2>
+          <p className="text-sm text-gray-500 mb-4 shrink-0">
             The analyst sees only how the statistics shifted. What can they deduce?
           </p>
 
-          <div className="space-y-4">
-            {QUESTIONS.map((q, qi) => {
+          <div className="flex-1 overflow-y-auto min-h-0 space-y-4">
+            {QUESTIONS.map((q) => {
               const g = guesses[q.key];
               return (
                 <div key={q.key} className="border border-gray-800 rounded-xl overflow-hidden">
-                  {/* Observed change — the "clue" */}
-                  <div className="bg-gray-900 px-4 py-2.5 border-b border-gray-800">
-                    <span className="text-[10px] text-gray-600 uppercase tracking-wider mr-2">Observed</span>
-                    <span className="text-xs font-mono text-amber-300">{q.q}</span>
+                  <div className="bg-gray-900 px-4 py-3 border-b border-gray-800">
+                    <span className="text-xs text-gray-600 uppercase tracking-wider mr-2">Observed</span>
+                    <span className="text-sm font-mono text-amber-300">{q.q}</span>
                   </div>
-                  {/* Question */}
-                  <div className="px-4 pt-3 pb-1">
-                    <p className="text-sm font-medium text-gray-200 mb-2">{q.prompt}</p>
-                    <div className="space-y-1.5">
+                  <div className="px-4 pt-4 pb-3">
+                    <p className="text-base font-medium text-gray-200 mb-3">{q.prompt}</p>
+                    <div className="space-y-2">
                       {q.options.map((opt, oi) => {
                         const chosen  = g === oi;
                         const correct = revealed && oi === q.correct;
                         const wrong   = revealed && chosen && oi !== q.correct;
                         return (
                           <button key={oi} onClick={() => !revealed && setGuesses(gs => ({ ...gs, [q.key]: oi }))}
-                            className={`w-full text-left px-3 py-2 rounded-lg border text-sm transition-colors ${
+                            className={`w-full text-left px-4 py-3 rounded-lg border text-sm transition-colors ${
                               correct ? 'border-green-700 bg-green-950/40 text-green-300' :
                               wrong   ? 'border-red-800  bg-red-950/30  text-red-300' :
                               chosen  ? 'border-cispa bg-cispa-dim/50 text-cispa-light' :
                                         'border-gray-800 text-gray-400 hover:border-gray-600'
                             } ${revealed ? 'cursor-default' : 'cursor-pointer'}`}>
-                            <span className="text-[10px] text-gray-600 font-mono mr-2">{String.fromCharCode(97+oi)})</span>
+                            <span className="text-xs text-gray-600 font-mono mr-2">{String.fromCharCode(97+oi)})</span>
                             {opt}
                             {correct && ' ✓'}{wrong && ' ✗'}
                           </button>
@@ -501,10 +482,9 @@
                       })}
                     </div>
                   </div>
-                  {/* Math explanation */}
                   {revealed && (
-                    <div className="px-4 pb-3 pt-2">
-                      <p className="text-[11px] text-gray-500 font-mono bg-gray-900/60 rounded px-2.5 py-1.5">
+                    <div className="px-4 pb-4">
+                      <p className="text-xs text-gray-500 font-mono bg-gray-900/60 rounded px-3 py-2">
                         {q.math}
                       </p>
                     </div>
@@ -514,29 +494,29 @@
             })}
           </div>
 
-          <div className="mt-4 space-y-3">
+          <div className="shrink-0 pt-3 space-y-3">
             {allAnswered && !revealed && (
               <button onClick={() => setRevealed(true)}
-                className="w-full py-2.5 rounded-xl bg-cispa hover:bg-cispa-light text-sm font-medium transition-colors">
+                className="w-full py-3 rounded-xl bg-cispa hover:bg-cispa-light text-sm font-medium transition-colors">
                 Check answers
               </button>
             )}
             {revealed && (
               <>
-                <div className="border border-gray-800 rounded-xl p-4 flex items-center justify-between">
+                <div className="border border-gray-800 rounded-xl px-4 py-3 flex items-center justify-between">
                   <div>
                     <span className="text-2xl font-bold">{score===1 ? '✓' : '✗'}</span>
-                    <span className="text-xs text-gray-500 ml-2">
+                    <span className="text-sm text-gray-500 ml-2">
                       {score===1 ? 'Exact salary recovered from one query.' : 'Try the math — one query is enough.'}
                     </span>
                   </div>
-                  <div className="text-right text-xs font-mono space-y-0.5">
+                  <div className="text-right text-sm font-mono space-y-0.5">
                     <div className="text-cispa-light font-semibold">{PERSON_X.name}</div>
                     <div className="text-gray-400">salary: ${PERSON_X.salary.toLocaleString()}</div>
                   </div>
                 </div>
                 <button onClick={onContinue}
-                  className="w-full py-2.5 rounded-xl bg-cispa hover:bg-cispa-light text-sm font-medium transition-colors">
+                  className="w-full py-3 rounded-xl bg-cispa hover:bg-cispa-light text-sm font-medium transition-colors">
                   How does DP protect x? →
                 </button>
               </>
@@ -561,8 +541,7 @@
       const vD         = noisyD.avgSalary;
       const vDX        = noisyDX.avgSalary;
       const obsDelta   = vDX - vD;
-      const trueDelta  = STATS_DX.avgSalary - STATS_D.avgSalary;   // ≈ $4,146
-      // Normalize signal and noise to the same reference for the bar chart
+      const trueDelta  = STATS_DX.avgSalary - STATS_D.avgSalary;
       const ref          = Math.max(scale * 1.1, trueDelta * 2);
       const signalBarPct = Math.min(95, (trueDelta / ref) * 100);
       const noiseBarPct  = Math.min(95, (scale    / ref) * 100);
@@ -575,16 +554,16 @@
                         "Minimal — noise barely conceals the signal";
 
       return (
-        <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8">
+        <div className="h-screen overflow-hidden flex flex-col max-w-2xl mx-auto px-6 py-3">
           <StepBar current={2} onStep={goToStep} />
-          <h2 className="text-xl font-bold mb-1">Differential privacy</h2>
-          <p className="text-xs text-gray-500 mb-6">
-            Add Laplace noise to every query answer. At small ε the reported salary averages for D and D+x
-            become indistinguishable — x's exact salary can no longer be recovered.
+          <h2 className="text-2xl font-bold mb-0.5 shrink-0">Differential privacy</h2>
+          <p className="text-sm text-gray-500 mb-3 shrink-0">
+            Add Laplace noise to every query answer. At small ε the reported salary averages become
+            indistinguishable — x's exact salary can no longer be recovered.
           </p>
 
           {/* Slider */}
-          <div className="border border-gray-800 rounded-xl p-4 mb-5 space-y-2">
+          <div className="border border-gray-800 rounded-xl p-4 mb-3 space-y-2 shrink-0">
             <div className="flex justify-between text-[10px] text-gray-600 uppercase tracking-wider">
               <span>← high privacy (ε = 0.1)</span>
               <span>no DP (ε = ∞) →</span>
@@ -593,97 +572,95 @@
               onChange={e => setSliderVal(Number(e.target.value))}
               className="w-full accent-cispa cursor-pointer" />
             <div className="flex items-center gap-3">
-              <span className="text-2xl font-mono font-bold text-cispa-light">ε = {epsilon === Infinity ? '∞' : epsilon.toFixed(2)}</span>
-              <span className="text-xs text-gray-500 flex-1 italic">{protection}</span>
+              <span className="text-3xl font-mono font-bold text-cispa-light">
+                ε = {epsilon === Infinity ? '∞' : epsilon.toFixed(2)}
+              </span>
+              <span className="text-sm text-gray-500 flex-1 italic">{protection}</span>
               <button onClick={() => setSeed(s => s+1)}
-                className="text-[11px] text-gray-600 hover:text-gray-400 border border-gray-800 rounded px-2 py-1 transition-colors">
+                className="text-xs text-gray-600 hover:text-gray-400 border border-gray-800 rounded px-2 py-1 transition-colors">
                 ↺ resample
               </button>
             </div>
           </div>
 
           {/* Two salary cards */}
-          <div className="grid grid-cols-2 gap-3 mb-3">
+          <div className="grid grid-cols-2 gap-3 mb-3 shrink-0">
             {[
               { label: 'D — 15 employees', noisy: vD, true_: STATS_D.avgSalary },
               { label: 'D+x — 16 employees', noisy: vDX, true_: STATS_DX.avgSalary },
             ].map(({ label, noisy, true_ }) => (
               <div key={label} className="border border-gray-800 rounded-xl p-4">
-                <div className="text-[10px] text-gray-600 uppercase tracking-wider mb-2">{label}</div>
-                <div className="font-mono text-2xl font-bold text-gray-100">{def.fmt(noisy)}</div>
-                <div className="text-[10px] text-gray-700 mt-1 font-mono">true: {def.fmt(true_)}</div>
+                <div className="text-xs text-gray-600 uppercase tracking-wider mb-1">{label}</div>
+                <div className="font-mono text-3xl font-bold text-gray-100">{def.fmt(noisy)}</div>
+                <div className="text-xs text-gray-700 mt-1 font-mono">true: {def.fmt(true_)}</div>
               </div>
             ))}
           </div>
 
           {/* Signal vs noise panel */}
-          <div className="border border-gray-800 rounded-xl p-5 mb-5">
-
-            <div className="flex items-start justify-between mb-5">
+          <div className="border border-gray-800 rounded-xl p-4 mb-3 flex-1 min-h-0 flex flex-col justify-between">
+            <div className="flex items-start justify-between">
               <div>
-                <div className="text-[10px] text-gray-600 uppercase tracking-wider mb-1">Reported salary change</div>
-                <div className="font-mono text-3xl font-bold text-gray-100">
+                <div className="text-xs text-gray-600 uppercase tracking-wider mb-1">Reported salary change</div>
+                <div className="font-mono text-4xl font-bold text-gray-100">
                   {obsDelta >= 0 ? '+' : '−'}{def.fmt(Math.abs(obsDelta))}
                 </div>
-                <div className="text-[10px] text-gray-600 mt-1 font-mono">
-                  (reported D+x) − (reported D)
-                </div>
+                <div className="text-xs text-gray-600 mt-1 font-mono">(reported D+x) − (reported D)</div>
               </div>
               <div className="text-right">
-                <div className="text-[10px] text-gray-600 uppercase tracking-wider mb-1">True signal</div>
-                <div className="font-mono text-xl text-amber-400">+{def.fmt(trueDelta)}</div>
-                <div className="text-[10px] text-gray-700 mt-1">x's salary contribution</div>
+                <div className="text-xs text-gray-600 uppercase tracking-wider mb-1">True signal</div>
+                <div className="font-mono text-2xl text-amber-400">+{def.fmt(trueDelta)}</div>
+                <div className="text-xs text-gray-700 mt-1">x's salary contribution</div>
               </div>
             </div>
-
-            {/* Side-by-side bars */}
-            <div className="space-y-2.5">
+            <div className="space-y-3 mt-4">
               <div>
-                <div className="flex justify-between text-[10px] text-gray-500 mb-1">
+                <div className="flex justify-between text-sm text-gray-500 mb-1">
                   <span>True signal</span>
                   <span className="font-mono text-amber-400">+{def.fmt(trueDelta)}</span>
                 </div>
-                <div className="h-3 bg-gray-800 rounded-full overflow-hidden">
+                <div className="h-4 bg-gray-800 rounded-full overflow-hidden">
                   <div className="h-full bg-amber-500/70 rounded-full transition-all duration-500"
                     style={{ width: `${signalBarPct}%` }} />
                 </div>
               </div>
               <div>
-                <div className="flex justify-between text-[10px] text-gray-500 mb-1">
-                  <span>Noise scale  (Laplace Δf / ε)</span>
-                  <span className="font-mono text-gray-400">{epsilon === Infinity ? '±$0 — no noise' : `±${def.fmt(scale)}`}</span>
+                <div className="flex justify-between text-sm text-gray-500 mb-1">
+                  <span>Noise scale (Laplace Δf / ε)</span>
+                  <span className="font-mono text-gray-400">
+                    {epsilon === Infinity ? '±$0 — no noise' : `±${def.fmt(scale)}`}
+                  </span>
                 </div>
-                <div className="h-3 bg-gray-800 rounded-full overflow-hidden">
+                <div className="h-4 bg-gray-800 rounded-full overflow-hidden">
                   <div className="h-full bg-cispa/60 rounded-full transition-all duration-500"
                     style={{ width: `${noiseBarPct}%` }} />
                 </div>
               </div>
             </div>
-
-            <p className="text-[10px] text-gray-600 mt-3 italic">
-              When the noise bar exceeds the signal bar, the salary change is indistinguishable from random fluctuation.
+            <p className="text-xs text-gray-600 mt-2 italic">
+              Noise bar &gt; signal bar → salary change indistinguishable from random fluctuation.
             </p>
           </div>
 
           {/* Formal guarantee */}
-          <div className="border border-cispa-dim/80 bg-cispa-dim/30 rounded-xl p-4 mb-6">
-            <div className="text-[10px] text-cispa uppercase tracking-wider mb-2">Formal ε-DP guarantee</div>
+          <div className="border border-cispa-dim/80 bg-cispa-dim/30 rounded-xl p-3 mb-3 shrink-0">
+            <div className="text-[10px] text-cispa uppercase tracking-wider mb-1">Formal ε-DP guarantee</div>
             <div className="font-mono text-sm text-cispa-light">
               P[M(D) = O] ≤ e<sup>ε</sup> · P[M(D+x) = O] &nbsp;&nbsp; ∀ outputs O
             </div>
-            <p className="text-xs text-gray-600 mt-2">
+            <p className="text-xs text-gray-600 mt-1">
               {epsilon === Infinity
-                ? 'At ε = ∞, no noise is added. D and D+x produce different outputs with probability 1 — x is fully exposed.'
-                : `At ε = ${epsilon.toFixed(2)}, D and D+x produce outputs within a factor of ${Math.exp(epsilon).toFixed(2)} of each other.${
+                ? 'At ε = ∞, no noise is added. D and D+x produce different outputs — x is fully exposed.'
+                : `At ε = ${epsilon.toFixed(2)}, outputs differ by at most factor ${Math.exp(epsilon).toFixed(2)}.${
                     Math.exp(epsilon) < 1.5 ? ' Practically indistinguishable.' :
                     Math.exp(epsilon) < 5   ? ' Some distinguishability remains.' :
                                               ' Easily distinguished — x is exposed.'}`}
             </p>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="shrink-0 flex items-center gap-4">
             <button onClick={onRestart}
-              className="text-xs text-gray-700 hover:text-gray-500 transition-colors">
+              className="text-sm text-gray-700 hover:text-gray-500 transition-colors">
               ← Start over
             </button>
             <button onClick={onContinue}
@@ -703,7 +680,6 @@
 
       const [selectedId, setSelectedId] = useState(DATABASE_DX[0].id);
       const emp = DATABASE_DX.find(r => r.id === selectedId);
-
       const completion = getCompletion(emp, epsilon, sliderVal);
 
       const protection =
@@ -714,17 +690,16 @@
                         'Minimal DP — significant leakage';
 
       return (
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
+        <div className="h-screen overflow-hidden flex flex-col max-w-5xl mx-auto px-6 py-3">
           <StepBar current={3} onStep={goToStep} />
-          <h2 className="text-xl font-bold mb-1">ML model trained on the same data</h2>
-          <p className="text-xs text-gray-500 mb-5">
-            Without DP, a model trained on D+x leaks information two ways: membership inference
-            (did this exact fact appear in training?) and verbatim extraction (can we recover the value?).
-            Drag ε to see DP-SGD shut both down.
+          <h2 className="text-2xl font-bold mb-0.5 shrink-0">ML model trained on the same data</h2>
+          <p className="text-sm text-gray-500 mb-3 shrink-0">
+            Without DP, a model trained on D+x leaks two ways: membership inference (did this fact appear in training?)
+            and verbatim extraction (can we recover the value?). Drag ε to see DP-SGD shut both down.
           </p>
 
-          {/* Shared epsilon slider */}
-          <div className="border border-gray-800 rounded-xl p-4 mb-6 space-y-2">
+          {/* Slider */}
+          <div className="border border-gray-800 rounded-xl p-3 mb-3 space-y-1.5 shrink-0">
             <div className="flex justify-between text-[10px] text-gray-600 uppercase tracking-wider">
               <span>← strong DP (ε = 0.1)</span>
               <span>no DP (ε = ∞) →</span>
@@ -733,20 +708,23 @@
               onChange={e => setSliderVal(Number(e.target.value))}
               className="w-full accent-cispa cursor-pointer" />
             <div className="flex items-center gap-3">
-              <span className="text-2xl font-mono font-bold text-cispa-light">ε = {epsilon === Infinity ? '∞' : epsilon.toFixed(2)}</span>
-              <span className="text-xs text-gray-500 flex-1 italic">{protection}</span>
+              <span className="text-2xl font-mono font-bold text-cispa-light">
+                ε = {epsilon === Infinity ? '∞' : epsilon.toFixed(2)}
+              </span>
+              <span className="text-sm text-gray-500 flex-1 italic">{protection}</span>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          {/* Two panels */}
+          <div className="flex-1 grid grid-cols-2 gap-4 min-h-0">
 
-            {/* Left panel: Membership inference */}
-            <div className="border border-gray-800 rounded-xl overflow-hidden">
-              <div className="bg-gray-900 px-4 py-2.5 border-b border-gray-800">
-                <span className="text-xs font-semibold text-gray-200">Membership inference</span>
-                <span className="text-[10px] text-gray-600 ml-2">— did this fact appear in training?</span>
+            {/* Left: Membership inference */}
+            <div className="border border-gray-800 rounded-xl overflow-hidden flex flex-col min-h-0">
+              <div className="bg-gray-900 px-4 py-2.5 border-b border-gray-800 shrink-0">
+                <span className="text-sm font-semibold text-gray-200">Membership inference</span>
+                <span className="text-xs text-gray-600 ml-2">— did this fact appear in training?</span>
               </div>
-              <div className="p-3 space-y-2.5">
+              <div className="flex-1 overflow-y-auto p-3 space-y-2">
                 {MI_CARDS.map(card => {
                   const score = membershipScore(card.baseScore, epsilon);
                   const pct   = Math.round(score * 100);
@@ -755,8 +733,8 @@
                   return (
                     <div key={card.id} className={`rounded-lg border p-3 ${
                       card.scary && high ? 'border-red-800/60 bg-red-950/20' : 'border-gray-800 bg-gray-900/30'}`}>
-                      <div className="flex items-start justify-between gap-2 mb-1.5">
-                        <span className={`text-xs font-mono ${card.scary && high ? 'text-red-300' : 'text-gray-300'}`}>
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <span className={`text-sm font-mono ${card.scary && high ? 'text-red-300' : 'text-gray-300'}`}>
                           "{card.text}"
                         </span>
                         {card.scary && (
@@ -766,44 +744,43 @@
                         )}
                       </div>
                       <div className="flex items-center gap-2">
-                        <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                        <div className="flex-1 h-2 bg-gray-800 rounded-full overflow-hidden">
                           <div className={`h-full rounded-full transition-all duration-500 ${
                             high ? 'bg-red-500' : low ? 'bg-green-600' : 'bg-amber-500'}`}
                             style={{ width: `${pct}%` }} />
                         </div>
-                        <span className={`text-[11px] font-mono font-bold w-8 text-right ${
+                        <span className={`text-xs font-mono font-bold w-8 text-right ${
                           high ? 'text-red-400' : low ? 'text-green-400' : 'text-amber-400'}`}>
-                          {(score).toFixed(2)}
+                          {score.toFixed(2)}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between mt-1">
+                      <div className="flex justify-between mt-1">
                         <span className="text-[9px] text-gray-700">0 — non-member</span>
-                        <div className="h-3 w-px bg-gray-700 mx-1 self-center" style={{marginLeft:`calc(50% - 4px)`}} />
                         <span className="text-[9px] text-gray-700">1 — member</span>
                       </div>
                     </div>
                   );
                 })}
-                <p className="text-[10px] text-gray-600 italic pt-1">
+                <p className="text-xs text-gray-600 italic pt-1">
                   Scores near 0.5 = indistinguishable from non-member. DP-SGD pushes all scores there.
                 </p>
               </div>
             </div>
 
-            {/* Right panel: Verbatim extraction */}
-            <div className="border border-gray-800 rounded-xl overflow-hidden">
-              <div className="bg-gray-900 px-4 py-2.5 border-b border-gray-800">
-                <span className="text-xs font-semibold text-gray-200">Verbatim memorization</span>
-                <span className="text-[10px] text-gray-600 ml-2">— can the model complete this text?</span>
+            {/* Right: Verbatim extraction */}
+            <div className="border border-gray-800 rounded-xl overflow-hidden flex flex-col min-h-0">
+              <div className="bg-gray-900 px-4 py-2.5 border-b border-gray-800 shrink-0">
+                <span className="text-sm font-semibold text-gray-200">Verbatim memorization</span>
+                <span className="text-xs text-gray-600 ml-2">— can the model complete this text?</span>
               </div>
-              <div className="p-4 space-y-4">
+              <div className="flex-1 p-4 flex flex-col gap-3 overflow-y-auto">
                 {/* Employee picker */}
-                <div>
-                  <label className="text-[10px] text-gray-600 uppercase tracking-wider block mb-1">
+                <div className="shrink-0">
+                  <label className="text-xs text-gray-600 uppercase tracking-wider block mb-1.5">
                     Select employee
                   </label>
                   <select value={selectedId} onChange={e => setSelectedId(Number(e.target.value))}
-                    className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-cispa">
+                    className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-gray-200 focus:outline-none focus:border-cispa">
                     {DATABASE_DX.map(r => (
                       <option key={r.id} value={r.id}>
                         {r.name}{r.id === 16 ? ' ← x' : ''}
@@ -812,22 +789,18 @@
                   </select>
                 </div>
 
-                {/* Text completion display */}
-                <div className="rounded-lg border border-gray-800 overflow-hidden font-mono text-sm">
-                  {/* Prompt */}
-                  <div className="bg-gray-900/80 px-4 py-3 border-b border-gray-800">
-                    <div className="text-[9px] text-gray-600 uppercase tracking-wider mb-1.5">Prompt</div>
-                    <span className="text-gray-500">
-                      Complete the HR record for {emp.name}:
-                    </span>
+                {/* Text completion */}
+                <div className="rounded-lg border border-gray-800 overflow-hidden font-mono text-sm flex flex-col" style={{minHeight:'160px'}}>
+                  <div className="bg-gray-900/80 px-4 py-3 border-b border-gray-800 shrink-0">
+                    <div className="text-[9px] text-gray-600 uppercase tracking-wider mb-1">Prompt</div>
+                    <span className="text-gray-500">Complete the HR record for {emp.name}:</span>
                   </div>
-                  {/* Completion */}
-                  <div className={`px-4 py-3 transition-colors duration-500 ${
+                  <div className={`px-4 py-4 transition-colors duration-500 ${
                     completion.quality === 'exact'     ? 'bg-red-950/15' :
                     completion.quality === 'noisy'     ? 'bg-amber-950/15' :
                                                          'bg-green-950/15'}`}>
                     <div className="text-[9px] text-gray-600 uppercase tracking-wider mb-2">Model output</div>
-                    <p className="text-gray-400 leading-relaxed">
+                    <p className="text-gray-400 leading-relaxed text-base">
                       <span>"They work in </span>
                       <CompletionChip text={completion.dept} quality={completion.quality} />
                       <span>, earning </span>
@@ -840,7 +813,7 @@
                 </div>
 
                 {/* Quality label */}
-                <div className={`rounded-lg px-4 py-2.5 text-xs border text-center transition-colors duration-500 ${
+                <div className={`shrink-0 rounded-lg px-4 py-3 text-sm border text-center transition-colors duration-500 ${
                   completion.quality === 'exact'
                     ? 'border-red-800/50   bg-red-950/20   text-red-300'
                     : completion.quality === 'noisy'
@@ -854,7 +827,7 @@
                 </div>
 
                 {emp.id === 16 && completion.quality !== 'protected' && (
-                  <div className="border border-amber-800/50 bg-amber-950/20 rounded-lg p-3 text-xs text-amber-300">
+                  <div className="shrink-0 border border-amber-800/50 bg-amber-950/20 rounded-lg p-3 text-sm text-amber-300">
                     <strong>Morgan X.</strong> — x's record. At high ε the model reproduces their exact salary. Slide left to protect it.
                   </div>
                 )}
@@ -862,9 +835,9 @@
             </div>
           </div>
 
-          <div className="mt-6 flex items-center gap-4">
+          <div className="shrink-0 pt-3 flex items-center gap-4">
             <button onClick={onRestart}
-              className="text-xs text-gray-700 hover:text-gray-500 transition-colors">
+              className="text-sm text-gray-700 hover:text-gray-500 transition-colors">
               ← Start over
             </button>
             <button onClick={onContinue}
@@ -879,86 +852,75 @@
     // ─── Phase 5: Research ───────────────────────────────────────────────────
     function PhaseResearch({ onRestart, goToStep }) {
       return (
-        <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8">
+        <div className="h-screen overflow-hidden flex flex-col max-w-4xl mx-auto px-6 py-3">
           <StepBar current={4} onStep={goToStep} />
-          <h2 className="text-xl font-bold mb-1">From HR databases to foundation models</h2>
-          <p className="text-xs text-gray-500 mb-6">
+          <h2 className="text-2xl font-bold mb-0.5 shrink-0">From HR databases to foundation models</h2>
+          <p className="text-sm text-gray-500 mb-3 shrink-0">
             The same privacy risk — at the scale of the entire internet.
           </p>
 
-          <div className="space-y-4">
+          <div className="flex-1 grid grid-cols-2 gap-3 min-h-0">
 
-            <div className="border border-gray-800 rounded-xl p-5">
-              <div className="flex items-start gap-4">
-                <span className="text-2xl shrink-0">🌐</span>
-                <div>
-                  <h3 className="font-semibold text-gray-100 mb-1.5">Foundation models train on everything</h3>
-                  <p className="text-sm text-gray-400 leading-relaxed">
-                    GPT-4, Llama, Gemini — trained on trillions of tokens from the open web, including medical
-                    forums, legal documents, financial records, and private communications. The
-                    "x joins the database" problem now involves billions of individuals, none of whom consented.
-                  </p>
-                </div>
+            <div className="border border-gray-800 rounded-xl p-5 flex items-start gap-4">
+              <span className="text-3xl shrink-0">🌐</span>
+              <div>
+                <h3 className="font-semibold text-base text-gray-100 mb-2">Foundation models train on everything</h3>
+                <p className="text-sm text-gray-400 leading-relaxed">
+                  GPT-4, Llama, Gemini — trained on trillions of tokens from the open web, including medical
+                  forums, legal documents, financial records, and private communications. The
+                  "x joins the database" problem now involves billions of individuals, none of whom consented.
+                </p>
               </div>
             </div>
 
-            <div className="border border-gray-800 rounded-xl p-5">
-              <div className="flex items-start gap-4">
-                <span className="text-2xl shrink-0">🔓</span>
-                <div>
-                  <h3 className="font-semibold text-gray-100 mb-1.5">Memorization attacks are real and proven</h3>
-                  <p className="text-sm text-gray-400 leading-relaxed">
-                    Carlini et al. (2021) extracted verbatim text from GPT-2 — names, phone numbers, addresses —
-                    using only public API access. The text completion exercise above is a simplified version
-                    of this exact attack. Membership inference against fine-tuned models regularly exceeds 80% accuracy.
-                  </p>
-                </div>
+            <div className="border border-gray-800 rounded-xl p-5 flex items-start gap-4">
+              <span className="text-3xl shrink-0">🔓</span>
+              <div>
+                <h3 className="font-semibold text-base text-gray-100 mb-2">Memorization attacks are real and proven</h3>
+                <p className="text-sm text-gray-400 leading-relaxed">
+                  Carlini et al. (2021) extracted verbatim text from GPT-2 — names, phone numbers, addresses —
+                  using only public API access. The text completion exercise above is a simplified version
+                  of this exact attack. Membership inference regularly exceeds 80% accuracy.
+                </p>
               </div>
             </div>
 
-            <div className="border border-gray-800 rounded-xl p-5">
-              <div className="flex items-start gap-4">
-                <span className="text-2xl shrink-0">⚖️</span>
-                <div>
-                  <h3 className="font-semibold text-gray-100 mb-1.5">DP-SGD works — but at a steep cost</h3>
-                  <p className="text-sm text-gray-400 leading-relaxed">
-                    Differentially private training (Abadi et al. 2016) clips and noises gradients during
-                    backpropagation, providing formal guarantees. But at the scale of large foundation models
-                    the utility loss is severe, and the correct privacy budget ε for real-world deployment
-                    remains an open question.
-                  </p>
-                </div>
+            <div className="border border-gray-800 rounded-xl p-5 flex items-start gap-4">
+              <span className="text-3xl shrink-0">⚖️</span>
+              <div>
+                <h3 className="font-semibold text-base text-gray-100 mb-2">DP-SGD works — but at a steep cost</h3>
+                <p className="text-sm text-gray-400 leading-relaxed">
+                  Differentially private training (Abadi et al. 2016) clips and noises gradients during
+                  backpropagation, providing formal guarantees. But at the scale of large foundation models
+                  the utility loss is severe, and the correct privacy budget ε remains an open question.
+                </p>
               </div>
             </div>
 
-            <div className="border border-cispa-dim/80 bg-cispa-dim/30 rounded-xl p-5">
-              <div className="flex items-start gap-4">
-                <span className="text-2xl shrink-0">🔬</span>
-                <div>
-                  <h3 className="font-semibold text-cispa-light mb-1.5">The open problem</h3>
-                  <p className="text-sm text-gray-400 leading-relaxed">
-                    Can we fine-tune or train large foundation models on sensitive data — medical records,
-                    financial data, private text — while providing meaningful differential privacy guarantees
-                    without destroying their usefulness? This requires new theory on the privacy-utility
-                    frontier at scale, tighter composition bounds, and better auditing tools to verify
-                    what ε values actually mean in practice.
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {['DP fine-tuning', 'Privacy auditing', 'Tight composition', 'DP synthetic data', 'Membership inference'].map(t => (
-                      <span key={t} className="text-[11px] bg-cispa-dim/70 border border-cispa-dim/80 text-cispa rounded-full px-2.5 py-1">
-                        {t}
-                      </span>
-                    ))}
-                  </div>
+            <div className="border border-cispa-dim/80 bg-cispa-dim/30 rounded-xl p-5 flex items-start gap-4">
+              <span className="text-3xl shrink-0">🔬</span>
+              <div>
+                <h3 className="font-semibold text-base text-cispa-light mb-2">The open problem</h3>
+                <p className="text-sm text-gray-400 leading-relaxed">
+                  Can we fine-tune large foundation models on sensitive data while providing meaningful DP
+                  guarantees without destroying usefulness? This requires new theory on the privacy-utility
+                  frontier, tighter composition bounds, and better auditing tools.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {['DP fine-tuning', 'Privacy auditing', 'Tight composition', 'DP synthetic data', 'Membership inference'].map(t => (
+                    <span key={t} className="text-xs bg-cispa-dim/70 border border-cispa-dim/80 text-cispa rounded-full px-2.5 py-1">
+                      {t}
+                    </span>
+                  ))}
                 </div>
               </div>
             </div>
 
           </div>
 
-          <div className="mt-6">
+          <div className="shrink-0 pt-3">
             <button onClick={onRestart}
-              className="text-xs text-gray-700 hover:text-gray-500 transition-colors">
+              className="text-sm text-gray-700 hover:text-gray-500 transition-colors">
               ← Start over
             </button>
           </div>
@@ -980,7 +942,7 @@
       const goToStep = i => setPhase(PHASES[i]);
 
       let content;
-      if (phase==='landing')  content = <Landing         onStart={()    => setPhase('compare')} />;
+      if      (phase==='landing')  content = <Landing         onStart={()    => setPhase('compare')} />;
       else if (phase==='compare')  content = <PhaseCompare    onContinue={() => setPhase('mcqa')}     goToStep={goToStep} />;
       else if (phase==='mcqa')     content = <PhaseMCQA       onContinue={() => setPhase('dp')}       goToStep={goToStep} />;
       else if (phase==='dp')       content = <PhaseDP         onContinue={() => setPhase('ml')} onRestart={() => setPhase('landing')} goToStep={goToStep} />;
