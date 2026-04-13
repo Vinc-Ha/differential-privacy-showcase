@@ -255,9 +255,9 @@
                 className="text-[10px] uppercase tracking-wider text-gray-600 hover:text-gray-400 border border-gray-800 rounded px-2 py-1 transition-colors whitespace-nowrap">
                 {showAdvanced ? '▼ Full' : '▶ Present'}
               </button>
-              <div className="bg-white rounded-lg px-3 py-1">
+              <div className="bg-white rounded-lg px-3 py-1.5">
                 <img src="769b98b74099646aa6bb597caefa24abfbecd74b.png"
-                  alt="CISPA" className="h-5 w-auto" />
+                  alt="CISPA" className="h-8 w-auto" />
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -326,8 +326,17 @@
 
     function PhaseCompare({ onContinue, goToStep, showAdvanced, onToggleAdvanced }) {
       const [xAdded, setXAdded] = useState(false);
+      useEffect(() => {
+        function onKey(e) {
+          if (e.key !== 'ArrowRight') return;
+          if (!xAdded) setXAdded(true);
+          else onContinue();
+        }
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [xAdded, onContinue]);
       return (
-        <div className="h-screen overflow-hidden flex flex-col max-w-5xl mx-auto px-6 py-3">
+        <div className="h-screen overflow-hidden flex flex-col max-w-5xl mx-auto px-6 py-2">
           <StepBar current={0} onStep={goToStep} showAdvanced={showAdvanced} onToggleAdvanced={onToggleAdvanced} />
           <div className="flex items-center justify-between mb-2 shrink-0">
             <div>
@@ -387,17 +396,17 @@
                 const changed = xAdded && delta !== 0;
                 const up      = delta > 0;
                 return (
-                  <div key={def.key} className={`border rounded-xl px-4 py-3 flex-1 transition-all duration-500 ${
+                  <div key={def.key} className={`border rounded-xl px-5 py-4 flex-1 flex flex-col justify-center transition-all duration-500 ${
                     changed ? 'border-amber-700/50 bg-amber-950/20' : 'border-gray-800 bg-gray-900/40'}`}>
-                    <div className="text-xs text-gray-600 uppercase tracking-wider mb-1">
+                    <div className="text-sm text-gray-500 uppercase tracking-wider mb-2">
                       {def.icon} {def.label}
                     </div>
                     <div className="flex items-end justify-between">
-                      <span className="font-mono text-xl font-bold">
+                      <span className="font-mono text-4xl font-bold">
                         {def.fmt(xAdded ? dxVal : dVal)}
                       </span>
                       {changed && (
-                        <span className={`text-sm font-mono font-bold ${up ? 'text-red-400' : 'text-emerald-400'}`}>
+                        <span className={`text-lg font-mono font-bold ${up ? 'text-red-400' : 'text-emerald-400'}`}>
                           {up ? '▲' : '▼'} {def.fmt(Math.abs(delta))}
                         </span>
                       )}
@@ -424,11 +433,31 @@
       const allAnswered = QUESTIONS.every(q => guesses[q.key] !== undefined);
       const score = QUESTIONS.filter(q => guesses[q.key] === q.correct).length;
 
+      useEffect(() => {
+        function onKey(e) {
+          if (e.key !== 'ArrowRight') return;
+          if (!allAnswered) {
+            // Select the correct answer for any unanswered question
+            setGuesses(gs => {
+              const next = { ...gs };
+              QUESTIONS.forEach(q => { if (next[q.key] === undefined) next[q.key] = q.correct; });
+              return next;
+            });
+          } else if (!revealed) {
+            setRevealed(true);
+          } else {
+            onContinue();
+          }
+        }
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [allAnswered, revealed, onContinue]);
+
       return (
-        <div className="h-screen overflow-hidden flex flex-col max-w-3xl mx-auto px-6 py-3">
+        <div className="h-screen overflow-hidden flex flex-col max-w-3xl mx-auto px-6 py-2">
           <StepBar current={1} onStep={goToStep} showAdvanced={showAdvanced} onToggleAdvanced={onToggleAdvanced} />
           <h2 className="text-2xl font-bold mb-1 shrink-0">Infer x's profile</h2>
-          <p className="text-sm text-gray-500 mb-4 shrink-0">
+          <p className="text-sm text-gray-500 mb-2 shrink-0">
             The analyst sees only how the statistics shifted. What can they deduce?
           </p>
           <div className="flex-1 overflow-y-auto min-h-0">
@@ -436,20 +465,20 @@
               const g = guesses[q.key];
               return (
                 <div key={q.key} className="border border-gray-800 rounded-xl overflow-hidden">
-                  <div className="bg-gray-900 px-5 py-4 border-b border-gray-800">
+                  <div className="bg-gray-900 px-6 py-5 border-b border-gray-800">
                     <span className="text-xs text-gray-600 uppercase tracking-wider mr-2">Observed</span>
                     <span className="text-base font-mono text-amber-300">{q.q}</span>
                   </div>
-                  <div className="px-5 pt-5 pb-4">
-                    <p className="text-xl font-semibold text-gray-200 mb-5">{q.prompt}</p>
-                    <div className="space-y-3">
+                  <div className="px-6 pt-6 pb-5">
+                    <p className="text-xl font-semibold text-gray-200 mb-6">{q.prompt}</p>
+                    <div className="space-y-4">
                       {q.options.map((opt, oi) => {
                         const chosen  = g === oi;
                         const correct = revealed && oi === q.correct;
                         const wrong   = revealed && chosen && oi !== q.correct;
                         return (
                           <button key={oi} onClick={() => !revealed && setGuesses(gs => ({ ...gs, [q.key]: oi }))}
-                            className={`w-full text-left px-5 py-4 rounded-lg border text-base transition-colors ${
+                            className={`w-full text-left px-6 py-5 rounded-lg border text-base transition-colors ${
                               correct ? 'border-green-700 bg-green-950/40 text-green-300' :
                               wrong   ? 'border-red-800  bg-red-950/30  text-red-300' :
                               chosen  ? 'border-cispa bg-cispa-dim/50 text-cispa-light' :
