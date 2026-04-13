@@ -742,7 +742,6 @@
           if (e.key === 'ArrowRight') {
             const next = PRESETS.find(v => v > sliderVal);
             if (next !== undefined) setSliderVal(next);
-            else onContinue();
           } else if (e.key === 'ArrowLeft') {
             const prev = [...PRESETS].reverse().find(v => v < sliderVal);
             if (prev !== undefined) setSliderVal(prev);
