@@ -679,9 +679,9 @@
       const salaryError    = Math.abs(inferredSalary - PERSON_X.salary);
 
       const recoveryStatus =
-        salaryError <= 10000 ? 'fail' :
-        salaryError <= 50000 ? 'partial' :
-                               'protected';
+        p < 0.3  ? 'fail' :
+        p < 0.55 ? 'partial' :
+                   'protected';
 
       const noiseScale = epsilon === Infinity ? 0 : def.sensitivity / epsilon;
 
@@ -773,10 +773,10 @@
               recoveryStatus === 'partial' ? 'text-amber-400/70' :
                                              'text-green-400/70'}`}>
               {recoveryStatus === 'fail'
-                ? 'Error ≤ $10,000 - the analyst can recover x\'s exact salary.'
+                ? 'Noise too small - the analyst can still recover x\'s salary.'
                 : recoveryStatus === 'partial'
-                ? 'Error $10k – $50k - rough salary range still visible.'
-                : 'Error > $50,000 - noise drowns out x\'s true salary.'}
+                ? 'Salary range still visible - x\'s bracket can be guessed.'
+                : 'Noise large enough - x\'s true salary is hidden.'}
             </div>
           </div>
 
