@@ -84,7 +84,7 @@
       { id:15, name:'Oscar M.',   dept:'HR',          salary:63000,  sick:7 },
     ];
 
-    // x earns $200,000 — revealed only after the quiz
+    // x earns $200,000 - revealed only after the quiz
     const PERSON_X = { id:16, name:'Morgan X.', dept:'Engineering', salary:200000, sick:2 };
     const DATABASE_DX = [...DATABASE_D, PERSON_X];
 
@@ -234,7 +234,7 @@
         key: 'salary',
         q: 'Mean salary rose from $78,667 → $86,250 when x joined.',
         prompt: "What is x's exact salary?",
-        options: ['Below $79k — close to the group average', '$80k – $100k', 'Above $100k'],
+        options: ['Below $70k', '$70k – $90k', 'Above $90k'],
         correct: 2,
         math: `x's salary = 16 × $86,250 − 15 × $78,667 = $1,380,000 − $1,180,005 = $199,995 ≈ $200,000`,
       },
@@ -333,10 +333,10 @@
             <div>
               <h2 className="text-2xl font-bold">
                 Database <span className="font-mono text-cispa-light">{xAdded ? 'D+x' : 'D'}</span>
-                <span className="text-gray-600 text-sm font-normal ml-2">— {xAdded ? 16 : 15} records</span>
+                <span className="text-gray-600 text-sm font-normal ml-2">- {xAdded ? 16 : 15} records</span>
               </h2>
               <p className="text-sm text-gray-500 mt-0.5">
-                The analyst sees only the aggregate statistics on the right — never individual rows.
+                The analyst sees only the aggregate statistics on the right - never individual rows.
               </p>
             </div>
             {!xAdded && (
@@ -487,7 +487,7 @@
                   <div>
                     <span className="text-2xl font-bold">{score===1 ? '✓' : '✗'}</span>
                     <span className="text-sm text-gray-500 ml-2">
-                      {score===1 ? 'Exact salary recovered from one query.' : 'Try the math — one query is enough.'}
+                      {score===1 ? 'Exact salary recovered from one query.' : 'Try the math - one query is enough.'}
                     </span>
                   </div>
                   <div className="text-right text-sm font-mono space-y-0.5">
@@ -506,93 +506,123 @@
       );
     }
 
-    // ─── Salary distribution chart ───────────────────────────────────────────
-    // Shows the Laplace distribution of reported mean(D+x) vs exact mean(D).
-    // At high ε the two are clearly separated; at low ε the distribution widens
-    // and the two peaks overlap — making inference impossible.
-    function SalaryDistribution({ epsilon, noiseScale }) {
-      const W = 560, H = 90;
-      const muD  = STATS_D.avgSalary;   // 78 667 — exact, sharp spike
-      const muDX = STATS_DX.avgSalary;  // 86 250 — noisy
+    // Salary distribution chart
+    // Two modes toggled by a button:
+    //   'mean'   - Laplace distribution of reported mean(D+x) vs exact mean(D)
+    //   'salary' - Laplace distribution of inferred x salary vs true salary ($200k)
+    // The noise scale for the salary mode is N_DX times the mean noise scale.
+    function SalaryDistribution({ epsilon, noiseScale, inferredSalary }) {
+      const [mode, setMode] = useState('salary');
+      const W = 560, H = 100;
 
-      // Visible salary window: centre between the two means, ±3 noise scales (min ±30k)
-      const halfSpan = Math.max(30000, noiseScale * 3.5);
-      const xMin = Math.min(muD, muDX) - halfSpan;
-      const xMax = Math.max(muD, muDX) + halfSpan;
+      // --- mode: mean ---
+      const muD        = STATS_D.avgSalary;   // 78,667
+      const muDX       = STATS_DX.avgSalary;  // 86,250
+      const meanNoise  = noiseScale;           // scale of mean(D+x) Laplace
+
+      // --- mode: salary ---
+      // inferred salary = N_DX * mean(D+x)_noisy - N_D * mean(D)
+      // noise on inferred salary = N_DX * noise on mean(D+x) => scale_sal = N_DX * meanNoise
+      const trueSalary = PERSON_X.salary;     // 200,000
+      const salNoise   = DATABASE_DX.length * meanNoise;  // amplified noise
+
+      const centre  = mode === 'mean' ? muDX        : trueSalary;
+      const scale   = mode === 'mean' ? meanNoise   : salNoise;
+      const refLine = mode === 'mean' ? muD         : trueSalary;   // amber line
+      const blueVal = mode === 'mean' ? muDX        : inferredSalary; // teal marker
+
+      const halfSpan = Math.max(
+        mode === 'mean' ? 30000 : 150000,
+        scale * 3.5
+      );
+      const xMin = Math.min(centre, refLine) - halfSpan;
+      const xMax = Math.max(centre, refLine) + halfSpan;
       const toSvgX = v => ((v - xMin) / (xMax - xMin)) * W;
 
-      // Laplace PDF for D+x (noisy)
       const laplacePdf = x => {
-        if (epsilon === Infinity || noiseScale === 0) return 0;
-        return Math.exp(-Math.abs(x - muDX) / noiseScale) / (2 * noiseScale);
+        if (epsilon === Infinity || scale === 0) return 0;
+        return Math.exp(-Math.abs(x - centre) / scale) / (2 * scale);
       };
 
-      // Normalise to SVG height (leave ~8px margin at top)
-      const peakPdf = epsilon === Infinity ? 1 : laplacePdf(muDX);
-      const normalize = v => peakPdf > 0 ? (v / peakPdf) * (H - 12) : 0;
+      const peakPdf  = epsilon === Infinity ? 1 : laplacePdf(centre);
+      const normalize = v => peakPdf > 0 ? (v / peakPdf) * (H - 18) : 0;
 
-      // Build SVG path for Laplace curve (100 steps)
-      const steps = 120;
+      const steps = 160;
       const points = Array.from({ length: steps + 1 }, (_, i) => {
         const x = xMin + (i / steps) * (xMax - xMin);
-        const y = H - normalize(laplacePdf(x));
+        const y = H - 10 - normalize(laplacePdf(x));
         return `${toSvgX(x).toFixed(1)},${y.toFixed(1)}`;
       });
       const curvePath = `M ${points.join(' L ')}`;
+      const fillPath  = `M ${toSvgX(xMin)},${H-10} L ${points.join(' L ')} L ${toSvgX(xMax)},${H-10} Z`;
 
-      // Fill path (close to bottom)
-      const fillPath = `M ${toSvgX(xMin)},${H} L ${points.join(' L ')} L ${toSvgX(xMax)},${H} Z`;
+      const xRef  = toSvgX(refLine).toFixed(1);
+      const xBlue = toSvgX(blueVal).toFixed(1);
+      const xCentre = toSvgX(centre).toFixed(1);
 
-      const xD  = toSvgX(muD).toFixed(1);
-      const xDX = toSvgX(muDX).toFixed(1);
+      // overlap = distribution wide enough to cover the reference line
+      const overlapping = epsilon !== Infinity && scale > Math.abs(centre - refLine) * 0.5;
 
-      const overlapping = epsilon !== Infinity && noiseScale > Math.abs(muDX - muD) * 0.5;
+      // x-axis ticks: 6 evenly spaced values
+      const tickCount = 6;
+      const ticks = Array.from({ length: tickCount }, (_, i) => {
+        const val = xMin + (i / (tickCount - 1)) * (xMax - xMin);
+        return { val, x: toSvgX(val) };
+      });
+
+      const refLabel  = mode === 'mean' ? 'mean(D)'    : 'true salary';
+      const blueLabel = mode === 'mean' ? 'mean(D+x)'  : 'inferred';
 
       return (
         <div className="border border-gray-800 rounded-xl p-4 mb-3 shrink-0">
           <div className="flex items-center justify-between mb-2">
             <div className="text-xs text-gray-600 uppercase tracking-wider">
-              Distribution of reported mean(D+x) vs exact mean(D)
+              {mode === 'mean' ? 'Reported mean(D+x) distribution' : 'Inferred salary distribution'}
             </div>
-            <div className={`text-xs font-semibold px-2.5 py-1 rounded-full border transition-all duration-500 ${
-              overlapping || epsilon === Infinity && false
-                ? 'border-green-700 bg-green-950/40 text-green-300'
-                : 'border-red-800 bg-red-950/30 text-red-300'}`}>
-              {overlapping ? '✓ Distributions overlap — inference fails' : '❌ Clearly separated — salary recoverable'}
+            <div className="flex items-center gap-2">
+              <div className={`text-xs font-semibold px-2.5 py-1 rounded-full border transition-all duration-500 ${
+                overlapping
+                  ? 'border-green-700 bg-green-950/40 text-green-300'
+                  : 'border-red-800 bg-red-950/30 text-red-300'}`}>
+                {overlapping ? 'Protected' : 'Recoverable'}
+              </div>
+              <button onClick={() => setMode(m => m === 'mean' ? 'salary' : 'mean')}
+                className="text-[10px] uppercase tracking-wider text-gray-600 hover:text-gray-400 border border-gray-800 rounded px-2 py-1 transition-colors">
+                {mode === 'mean' ? 'Show salary' : 'Show mean'}
+              </button>
             </div>
           </div>
+
           <svg width="100%" viewBox={`0 0 ${W} ${H}`} className="overflow-visible">
-            {/* Fill under Laplace curve */}
-            {epsilon !== Infinity && (
-              <path d={fillPath} fill="rgba(0,145,181,0.12)" />
-            )}
-            {/* Laplace curve for D+x */}
-            {epsilon !== Infinity && (
-              <path d={curvePath} fill="none" stroke="#0091B5" strokeWidth="1.5" />
-            )}
-            {/* D mean — exact vertical line (sharp) */}
-            <line x1={xD} y1="4" x2={xD} y2={H} stroke="#f59e0b" strokeWidth="2" strokeDasharray="4,3" />
-            {/* D+x mean — true value marker */}
-            <line x1={xDX} y1="4" x2={xDX} y2={H} stroke="#4DC8E0" strokeWidth="1.5" strokeDasharray="2,3" opacity="0.5" />
-            {/* At ε=∞ show D+x as sharp spike too */}
-            {epsilon === Infinity && (
-              <line x1={xDX} y1="4" x2={xDX} y2={H} stroke="#4DC8E0" strokeWidth="2" />
-            )}
-            {/* Labels */}
-            <text x={xD} y="3" textAnchor="middle" fontSize="8" fill="#f59e0b" dominantBaseline="hanging">mean(D)</text>
-            <text x={xDX} y="3" textAnchor="middle" fontSize="8" fill="#4DC8E0" dominantBaseline="hanging">mean(D+x)</text>
+            {/* Fill */}
+            {epsilon !== Infinity && <path d={fillPath} fill="rgba(0,145,181,0.12)" />}
+            {/* Curve */}
+            {epsilon !== Infinity && <path d={curvePath} fill="none" stroke="#0091B5" strokeWidth="1.5" />}
+
+            {/* Reference line (amber) */}
+            <line x1={xRef} y1="14" x2={xRef} y2={H-10} stroke="#f59e0b" strokeWidth="2" strokeDasharray="4,3" />
+            <text x={xRef} y="2" textAnchor="middle" fontSize="8" fill="#f59e0b" dominantBaseline="hanging">{refLabel}</text>
+
+            {/* Blue marker: mode=mean shows true mean(D+x), mode=salary shows current inferred value */}
+            {epsilon === Infinity
+              ? <line x1={xCentre} y1="14" x2={xCentre} y2={H-10} stroke="#4DC8E0" strokeWidth="2" />
+              : <line x1={xBlue}   y1="14" x2={xBlue}   y2={H-10} stroke="#4DC8E0" strokeWidth="1.5" strokeDasharray="2,3" opacity="0.7" />
+            }
+            <text x={epsilon === Infinity ? xCentre : xBlue} y="2" textAnchor="middle" fontSize="8" fill="#4DC8E0" dominantBaseline="hanging">{blueLabel}</text>
+
+            {/* X-axis line */}
+            <line x1="0" y1={H-10} x2={W} y2={H-10} stroke="#374151" strokeWidth="0.5" />
+
+            {/* Ticks */}
+            {ticks.map(({ val, x }, i) => (
+              <g key={i}>
+                <line x1={x} y1={H-10} x2={x} y2={H-7} stroke="#4B5563" strokeWidth="0.5" />
+                <text x={x} y={H-5} textAnchor="middle" fontSize="7" fill="#6B7280" dominantBaseline="hanging">
+                  {val >= 1000 ? `$${Math.round(val/1000)}k` : `$${Math.round(val)}`}
+                </text>
+              </g>
+            ))}
           </svg>
-          <div className="flex justify-between text-[10px] text-gray-700 mt-1 font-mono">
-            <span>${Math.round(xMin / 1000)}k</span>
-            <span className="text-gray-600 italic">
-              {epsilon === Infinity
-                ? 'No noise — two perfectly separated spikes'
-                : overlapping
-                ? 'Noise smears D+x across the D mean — indistinguishable'
-                : 'Gap still visible — salary roughly recoverable'}
-            </span>
-            <span>${Math.round(xMax / 1000)}k</span>
-          </div>
         </div>
       );
     }
@@ -627,11 +657,11 @@
       const noiseScale = epsilon === Infinity ? 0 : def.sensitivity / epsilon;
 
       const epsilonLabel =
-        epsilon === Infinity ? 'No privacy — true values returned exactly' :
-        epsilon < 0.5 ? "Strong — salary well hidden in noise" :
-        epsilon < 2   ? "Moderate — some signal remains" :
-        epsilon < 5   ? "Weak — salary approximately recoverable" :
-                        "Minimal — salary nearly exactly recoverable";
+        epsilon === Infinity ? 'No privacy - true values returned exactly' :
+        epsilon < 0.5 ? "Strong - salary well hidden in noise" :
+        epsilon < 2   ? "Moderate - some signal remains" :
+        epsilon < 5   ? "Weak - salary approximately recoverable" :
+                        "Minimal - salary nearly exactly recoverable";
 
       const inferredFmt = inferredSalary < 0
         ? `−$${Math.abs(Math.round(inferredSalary)).toLocaleString()}`
@@ -669,12 +699,12 @@
           {/* Two salary cards: D exact | D+x noisy */}
           <div className="grid grid-cols-2 gap-3 mb-3 shrink-0">
             <div className="border border-gray-800 rounded-xl p-4">
-              <div className="text-xs text-gray-600 uppercase tracking-wider mb-1">D — 15 employees</div>
+              <div className="text-sm font-bold text-gray-300 uppercase tracking-wider mb-1">D - 15 employees</div>
               <div className="font-mono text-3xl font-bold text-gray-100">{def.fmt(exactDMean)}</div>
-              <div className="text-xs text-gray-600 mt-1.5 font-mono">Exact — no noise added</div>
+              <div className="text-xs text-gray-600 mt-1.5 font-mono">Exact - no noise added</div>
             </div>
             <div className="border border-gray-800 rounded-xl p-4">
-              <div className="text-xs text-gray-600 uppercase tracking-wider mb-1">D+x — 16 employees</div>
+              <div className="text-sm font-bold text-gray-300 uppercase tracking-wider mb-1">D+x - 16 employees</div>
               <div className="font-mono text-3xl font-bold text-gray-100">{def.fmt(noisyDXMean)}</div>
               <div className="text-xs text-gray-700 mt-1.5 font-mono">
                 true: {def.fmt(STATS_DX.avgSalary)}
@@ -713,15 +743,15 @@
               recoveryStatus === 'partial' ? 'text-amber-400/70' :
                                              'text-green-400/70'}`}>
               {recoveryStatus === 'fail'
-                ? 'Error ≤ $10,000 — the analyst can recover x\'s exact salary.'
+                ? 'Error ≤ $10,000 - the analyst can recover x\'s exact salary.'
                 : recoveryStatus === 'partial'
-                ? 'Error $10k – $50k — rough salary range still visible.'
-                : 'Error > $50,000 — noise drowns out x\'s true salary.'}
+                ? 'Error $10k – $50k - rough salary range still visible.'
+                : 'Error > $50,000 - noise drowns out x\'s true salary.'}
             </div>
           </div>
 
           {/* Distribution visualization */}
-          <SalaryDistribution epsilon={epsilon} noiseScale={noiseScale} />
+          <SalaryDistribution epsilon={epsilon} noiseScale={noiseScale} inferredSalary={inferredSalary} />
 
           <div className="shrink-0 flex items-center gap-4">
             <button onClick={onRestart}
@@ -750,11 +780,11 @@
       const completion = getCompletion(emp, epsilon);
 
       const protection =
-        epsilon === Infinity ? 'No DP — model fully memorizes training data' :
-        epsilon < 0.5 ? 'Strong DP — both attacks fail' :
-        epsilon < 2   ? 'Moderate DP — extraction noisy, inference near chance' :
-        epsilon < 5   ? 'Weak DP — some leakage visible' :
-                        'Minimal DP — significant leakage';
+        epsilon === Infinity ? 'No DP - model fully memorizes training data' :
+        epsilon < 0.5 ? 'Strong DP - both attacks fail' :
+        epsilon < 2   ? 'Moderate DP - extraction noisy, inference near chance' :
+        epsilon < 5   ? 'Weak DP - some leakage visible' :
+                        'Minimal DP - significant leakage';
 
       return (
         <div className="h-screen overflow-hidden flex flex-col max-w-5xl mx-auto px-6 py-3">
@@ -787,7 +817,7 @@
             <div className="border border-gray-800 rounded-xl overflow-hidden flex flex-col min-h-0">
               <div className="bg-gray-900 px-4 py-2.5 border-b border-gray-800 shrink-0">
                 <span className="text-sm font-semibold text-gray-200">Membership inference</span>
-                <span className="text-xs text-gray-600 ml-2">— did this fact appear in training?</span>
+                <span className="text-xs text-gray-600 ml-2">- did this fact appear in training?</span>
               </div>
               <div className="flex-1 overflow-y-auto p-3 space-y-2">
                 {MI_CARDS.map(card => {
@@ -820,8 +850,8 @@
                         </span>
                       </div>
                       <div className="flex justify-between mt-1">
-                        <span className="text-[9px] text-gray-700">0 — non-member</span>
-                        <span className="text-[9px] text-gray-700">1 — member</span>
+                        <span className="text-[9px] text-gray-700">0 - non-member</span>
+                        <span className="text-[9px] text-gray-700">1 - member</span>
                       </div>
                     </div>
                   );
@@ -836,7 +866,7 @@
             <div className="border border-gray-800 rounded-xl overflow-hidden flex flex-col min-h-0">
               <div className="bg-gray-900 px-4 py-2.5 border-b border-gray-800 shrink-0">
                 <span className="text-sm font-semibold text-gray-200">Verbatim memorization</span>
-                <span className="text-xs text-gray-600 ml-2">— can the model complete this text?</span>
+                <span className="text-xs text-gray-600 ml-2">- can the model complete this text?</span>
               </div>
               <div className="flex-1 p-4 flex flex-col gap-3 overflow-y-auto">
                 <div className="shrink-0">
@@ -880,14 +910,14 @@
                     ? 'border-amber-800/50 bg-amber-950/20 text-amber-300'
                     : 'border-green-800/50 bg-green-950/20 text-green-300'}`}>
                   {completion.quality === 'exact'
-                    ? 'Verbatim extraction — training data reproduced exactly'
+                    ? 'Verbatim extraction - training data reproduced exactly'
                     : completion.quality === 'noisy'
-                    ? 'Coherent but wrong — plausible text, incorrect values'
-                    : 'Protected — DP noise makes output incoherent gibberish'}
+                    ? 'Coherent but wrong - plausible text, incorrect values'
+                    : 'Protected - DP noise makes output incoherent gibberish'}
                 </div>
                 {emp.id === 16 && completion.quality !== 'protected' && (
                   <div className="shrink-0 border border-amber-800/50 bg-amber-950/20 rounded-lg p-3 text-sm text-amber-300">
-                    <strong>Morgan X.</strong> — x's record. At high ε the model reproduces their $200,000 salary exactly. Slide left to protect it.
+                    <strong>Morgan X.</strong> - x's record. At high ε the model reproduces their $200,000 salary exactly. Slide left to protect it.
                   </div>
                 )}
               </div>
@@ -915,7 +945,7 @@
           <StepBar current={4} onStep={goToStep} showAdvanced={showAdvanced} onToggleAdvanced={onToggleAdvanced} />
           <h2 className="text-2xl font-bold mb-0.5 shrink-0">From HR databases to foundation models</h2>
           <p className="text-sm text-gray-500 mb-3 shrink-0">
-            The same privacy risk — at the scale of the entire internet.
+            The same privacy risk - at the scale of the entire internet.
           </p>
           <div className="flex-1 grid grid-cols-2 gap-3 min-h-0">
             <div className="border border-gray-800 rounded-xl p-5 flex items-start gap-4">
@@ -923,7 +953,7 @@
               <div>
                 <h3 className="font-semibold text-base text-gray-100 mb-2">Foundation models train on everything</h3>
                 <p className="text-sm text-gray-400 leading-relaxed">
-                  GPT-4, Llama, Gemini — trained on trillions of tokens from the open web, including medical
+                  GPT-4, Llama, Gemini - trained on trillions of tokens from the open web, including medical
                   forums, legal documents, financial records, and private communications. The
                   "x joins the database" problem now involves billions of individuals, none of whom consented.
                 </p>
@@ -934,7 +964,7 @@
               <div>
                 <h3 className="font-semibold text-base text-gray-100 mb-2">Memorization attacks are real and proven</h3>
                 <p className="text-sm text-gray-400 leading-relaxed">
-                  Carlini et al. (2021) extracted verbatim text from GPT-2 — names, phone numbers, addresses —
+                  Carlini et al. (2021) extracted verbatim text from GPT-2 - names, phone numbers, addresses -
                   using only public API access. The text completion exercise above is a simplified version
                   of this exact attack. Membership inference regularly exceeds 80% accuracy.
                 </p>
@@ -943,7 +973,7 @@
             <div className="border border-gray-800 rounded-xl p-5 flex items-start gap-4">
               <span className="text-3xl shrink-0">⚖️</span>
               <div>
-                <h3 className="font-semibold text-base text-gray-100 mb-2">DP-SGD works — but at a steep cost</h3>
+                <h3 className="font-semibold text-base text-gray-100 mb-2">DP-SGD works - but at a steep cost</h3>
                 <p className="text-sm text-gray-400 leading-relaxed">
                   Differentially private training (Abadi et al. 2016) clips and noises gradients during
                   backpropagation, providing formal guarantees. But at the scale of large foundation models
