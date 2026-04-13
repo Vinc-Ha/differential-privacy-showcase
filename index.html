@@ -629,23 +629,23 @@
 
     // ─── Phase 3: DP ─────────────────────────────────────────────────────────
     function PhaseDP({ onContinue, onRestart, goToStep, showAdvanced, onToggleAdvanced }) {
-      const sliderToEps = v => v >= 100 ? Infinity : Math.pow(10, -1 + (v / 99) * 2);
-      const [sliderVal, setSliderVal] = useState(85);
+      // p = 0 (left) = no privacy, p = 1 (right) = high privacy
+      // ε = 2.5 / p  so max noise at p=1 is manageable (~±$80k inferred)
+      const [sliderVal, setSliderVal] = useState(0);
       const [seed, setSeed] = useState(0);
-      const epsilon = sliderToEps(sliderVal);
+      const p       = sliderVal / 100;
+      const epsilon = p === 0 ? Infinity : 2.5 / p;
 
       const def = STAT_DEFS[0]; // avgSalary only
 
-      // Only D+x gets Laplace noise; D is reported exactly (no DP applied to D)
+      // Only D+x gets Laplace noise; D is reported exactly
       const noisyDXMean = useMemo(() => {
         if (epsilon === Infinity) return STATS_DX.avgSalary;
         const noise = laplaceSample(def.sensitivity / epsilon);
-        return Math.max(0, STATS_DX.avgSalary + noise); // clipped: salary means can't be negative
+        return Math.max(0, STATS_DX.avgSalary + noise);
       }, [epsilon, seed]);
 
-      const exactDMean = STATS_D.avgSalary; // D reported without noise
-
-      // Analyst's inference: x's salary = n_DX * mean(D+x) − n_D * mean(D)
+      const exactDMean    = STATS_D.avgSalary;
       const inferredSalary = DATABASE_DX.length * noisyDXMean - DATABASE_D.length * exactDMean;
       const salaryError    = Math.abs(inferredSalary - PERSON_X.salary);
 
@@ -656,12 +656,13 @@
 
       const noiseScale = epsilon === Infinity ? 0 : def.sensitivity / epsilon;
 
-      const epsilonLabel =
-        epsilon === Infinity ? 'No privacy - true values returned exactly' :
-        epsilon < 0.5 ? "Strong - salary well hidden in noise" :
-        epsilon < 2   ? "Moderate - some signal remains" :
-        epsilon < 5   ? "Weak - salary approximately recoverable" :
-                        "Minimal - salary nearly exactly recoverable";
+      const privacyLabel =
+        p === 0    ? 'No protection' :
+        p < 0.3    ? 'Minimal protection' :
+        p < 0.5    ? 'Weak protection' :
+        p < 0.7    ? 'Moderate protection' :
+        p < 0.9    ? 'Strong protection' :
+                     'Maximum protection';
 
       const inferredFmt = inferredSalary < 0
         ? `−$${Math.abs(Math.round(inferredSalary)).toLocaleString()}`
@@ -678,17 +679,17 @@
           {/* Slider */}
           <div className="border border-gray-800 rounded-xl p-4 mb-3 space-y-2 shrink-0">
             <div className="flex justify-between text-[10px] text-gray-600 uppercase tracking-wider">
-              <span>← high privacy (ε = 0.1)</span>
-              <span>no DP (ε = ∞) →</span>
+              <span>No privacy (p = 0)</span>
+              <span>High privacy (p = 1)</span>
             </div>
             <input type="range" min="0" max="100" step="1" value={sliderVal}
               onChange={e => setSliderVal(Number(e.target.value))}
               className="w-full accent-cispa cursor-pointer" />
             <div className="flex items-center gap-3">
               <span className="text-3xl font-mono font-bold text-cispa-light">
-                ε = {epsilon === Infinity ? '∞' : epsilon.toFixed(2)}
+                p = {p.toFixed(2)}
               </span>
-              <span className="text-sm text-gray-500 flex-1 italic">{epsilonLabel}</span>
+              <span className="text-sm text-gray-500 flex-1 italic">{privacyLabel}</span>
               <button onClick={() => setSeed(s => s+1)}
                 className="text-xs text-gray-600 hover:text-gray-400 border border-gray-800 rounded px-2 py-1 transition-colors">
                 ↺ resample
@@ -771,42 +772,44 @@
 
     // ─── Phase 4: ML model ───────────────────────────────────────────────────
     function PhaseML({ onContinue, onRestart, goToStep, showAdvanced, onToggleAdvanced }) {
-      const sliderToEps = v => v >= 100 ? Infinity : Math.pow(10, -1 + (v / 99) * 2);
-      const [sliderVal, setSliderVal] = useState(100);
-      const epsilon = sliderToEps(sliderVal);
+      // p = 0 (left) = no privacy, p = 1 (right) = high privacy
+      // ε = 10^(1 - p*2): p=0→∞, p=0.5→1, p=1→0.1 — full range for text completion stages
+      const [sliderVal, setSliderVal] = useState(0);
+      const p       = sliderVal / 100;
+      const epsilon = p === 0 ? Infinity : Math.pow(10, 1 - p * 2);
 
       const [selectedId, setSelectedId] = useState(DATABASE_DX[0].id);
       const emp = DATABASE_DX.find(r => r.id === selectedId);
       const completion = getCompletion(emp, epsilon);
 
       const protection =
-        epsilon === Infinity ? 'No DP - model fully memorizes training data' :
-        epsilon < 0.5 ? 'Strong DP - both attacks fail' :
-        epsilon < 2   ? 'Moderate DP - extraction noisy, inference near chance' :
-        epsilon < 5   ? 'Weak DP - some leakage visible' :
-                        'Minimal DP - significant leakage';
+        p === 0  ? 'No protection - model fully memorizes training data' :
+        p < 0.3  ? 'Minimal protection - significant leakage visible' :
+        p < 0.5  ? 'Weak protection - some patterns still extractable' :
+        p < 0.7  ? 'Moderate protection - extraction becoming noisy' :
+                   'Strong protection - both attacks fail';
 
       return (
         <div className="h-screen overflow-hidden flex flex-col max-w-5xl mx-auto px-6 py-3">
           <StepBar current={3} onStep={goToStep} showAdvanced={showAdvanced} onToggleAdvanced={onToggleAdvanced} />
           <h2 className="text-2xl font-bold mb-0.5 shrink-0">ML model trained on the same data</h2>
           <p className="text-sm text-gray-500 mb-3 shrink-0">
-            Without DP, a model trained on D+x leaks two ways: membership inference (did this fact appear in training?)
-            and verbatim extraction (can we recover the value?). Drag ε to see DP-SGD shut both down.
+            Without privacy protection, a model trained on D+x leaks two ways: membership inference (did this fact appear in training?)
+            and verbatim extraction (can we recover the value?). Increase privacy to see DP-SGD shut both down.
           </p>
 
           {/* Slider */}
           <div className="border border-gray-800 rounded-xl p-3 mb-3 space-y-1.5 shrink-0">
             <div className="flex justify-between text-[10px] text-gray-600 uppercase tracking-wider">
-              <span>← strong DP (ε = 0.1)</span>
-              <span>no DP (ε = ∞) →</span>
+              <span>No privacy (p = 0)</span>
+              <span>High privacy (p = 1)</span>
             </div>
             <input type="range" min="0" max="100" step="1" value={sliderVal}
               onChange={e => setSliderVal(Number(e.target.value))}
               className="w-full accent-cispa cursor-pointer" />
             <div className="flex items-center gap-3">
               <span className="text-2xl font-mono font-bold text-cispa-light">
-                ε = {epsilon === Infinity ? '∞' : epsilon.toFixed(2)}
+                p = {p.toFixed(2)}
               </span>
               <span className="text-sm text-gray-500 flex-1 italic">{protection}</span>
             </div>
