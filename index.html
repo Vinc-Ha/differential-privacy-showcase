@@ -754,12 +754,18 @@
 
       const def = STAT_DEFS[0]; // avgSalary only
 
-      // Only D+x gets Laplace noise; D is reported exactly
+      // Initial preset deltas — look like genuine Laplace samples, not round numbers.
+      // Only used on first load (seed === 0); after resampling, fully random.
+      // p=0.5 → inferred ≈ €267k  |  p=1.0 → inferred ≈ €42k
+      const PRESET_MEAN_DELTA = { 50: 4173, 100: -9847 };
+
       const noisyDXMean = useMemo(() => {
         if (epsilon === Infinity) return STATS_DX.avgSalary;
+        const fixed = seed === 0 ? PRESET_MEAN_DELTA[sliderVal] : undefined;
+        if (fixed !== undefined) return STATS_DX.avgSalary + fixed;
         const noise = laplaceSample(def.sensitivity / epsilon);
         return Math.max(0, STATS_DX.avgSalary + noise);
-      }, [epsilon, seed]);
+      }, [epsilon, seed, sliderVal]);
 
       const exactDMean    = STATS_D.avgSalary;
       const inferredSalary = DATABASE_DX.length * noisyDXMean - DATABASE_D.length * exactDMean;
